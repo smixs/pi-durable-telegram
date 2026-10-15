@@ -23,6 +23,8 @@
 Built on [pi](https://pi.dev), an open-source coding agent, and its new durable engine
 [pi-durable](https://earendil.com/posts/pi-durable/).
 
+**How it differs from plain pi.** Plain pi keeps the history: if it dies, you restart it and type "continue". pi-durable stores every step before it runs it. After a crash or a reboot the agent finishes what it started on its own, the answer arrives once, and unsafe actions are not repeated. It is built for an agent nobody is watching.
+
 ## Install
 
 You need a Linux server, a Telegram account and an AI subscription or API key. On the server, run:
