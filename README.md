@@ -23,7 +23,7 @@
 Built on [pi](https://pi.dev), an open-source coding agent, and its new durable engine
 [pi-durable](https://earendil.com/posts/pi-durable/).
 
-**How it differs from plain pi.** Plain pi keeps the history: if it dies, you restart it and type "continue". pi-durable stores every step before it runs it. After a crash or a reboot the agent finishes what it started on its own, the answer arrives once, and unsafe actions are not repeated. It is built for an agent nobody is watching.
+**How it differs from plain pi.** When plain pi dies, you restart it, find the session and say "continue". pi-durable records every step before it takes it. That makes it fit for always-on agents that survive crashes and reboots and always finish what they started.
 
 ## Install
 
