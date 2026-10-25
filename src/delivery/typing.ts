@@ -7,12 +7,14 @@ export class TypingPulse {
 	readonly #port: TelegramPort;
 	readonly #chatId: number;
 	readonly #signal: AbortSignal | undefined;
+	readonly #threadId: number | undefined;
 	#timer: NodeJS.Timeout | undefined;
 
-	constructor(port: TelegramPort, chatId: number, signal?: AbortSignal) {
+	constructor(port: TelegramPort, chatId: number, signal?: AbortSignal, threadId?: number) {
 		this.#port = port;
 		this.#chatId = chatId;
 		this.#signal = signal;
+		this.#threadId = threadId;
 	}
 
 	set(on: boolean): void {
@@ -33,6 +35,6 @@ export class TypingPulse {
 			this.stop();
 			return;
 		}
-		this.#port.sendChatAction(this.#chatId, "typing", this.#signal).catch(() => undefined);
+		this.#port.sendChatAction(this.#chatId, "typing", this.#signal, this.#threadId).catch(() => undefined);
 	}
 }

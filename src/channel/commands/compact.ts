@@ -11,7 +11,12 @@ export async function runCompact(scope: MessageScope, instructions: string): Pro
 	if (!(await recordKey(conversation, scope.key, BG, scope.updateId))) return;
 	const compactionTaskId = await conversation.compact(instructions === "" ? undefined : instructions, BG);
 	await conversation.commit(async (tx) => {
-		const input = { chatId: scope.chatId, replyTo: scope.messageId, compactionTaskId };
+		const input = {
+			chatId: scope.chatId,
+			replyTo: scope.messageId,
+			compactionTaskId,
+			...(scope.threadId === undefined ? {} : { threadId: scope.threadId }),
+		};
 		await tx.createTask(rt.compactReport, input, { ownership: { kind: "conversation" }, background: true });
 	}, BG);
 	await reply(scope, "Compacting…");

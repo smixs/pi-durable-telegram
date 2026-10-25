@@ -17,17 +17,19 @@ import { isFatalHarnessError } from "../runtime/fatal.ts";
 import { errorSummary } from "../runtime/log.ts";
 import { DownloadError, downloadToFile, downloadToMemory } from "../telegram/download.ts";
 import { checkAccess } from "./access.ts";
-import { classifyMessage } from "./classify.ts";
+import { classifyMessage, isTopicServiceOnly } from "./classify.ts";
 import { runCompact } from "./commands/compact.ts";
 import { runNew } from "./commands/new.ts";
 import { runHelp } from "./commands/start-help.ts";
 import { runStatus } from "./commands/status.ts";
 import { runStop } from "./commands/stop.ts";
 import { Buttons, messageKey } from "./docs.ts";
+import { draftScope } from "./draft-stop.ts";
 import { admit, type DuplicateReason, knownAs } from "./intake.ts";
 import { forwardMarker } from "./provenance.ts";
 import { type ChannelRuntime, type MessageScope, reply } from "./scope.ts";
 import { handleTap } from "./tap.ts";
+import { rememberTopicName } from "./topic-names.ts";
 
 const MB = 1024 * 1024;
 
@@ -53,8 +55,12 @@ async function route(rt: ChannelRuntime, update: Update): Promise<void> {
 		return;
 	}
 	if (update.callback_query !== undefined) return handleTap(rt, update.callback_query);
-	if (update.stopped_message_generation !== undefined) return stopFromDraft(rt, access.chatId, update.update_id);
+	if (update.stopped_message_generation !== undefined) {
+		const draft = update.stopped_message_generation;
+		return stopFromDraft(rt, access.chatId, draft.draft_id, update.update_id);
+	}
 	const message = update.message as Message;
+	if (isTopicServiceOnly(message)) return rememberTopicName(rt.harness, message, BG);
 	const scope = await scopeFor(rt, message, update.update_id);
 	const reason = await knownAs(rt.harness, scope.conversation, scope.key, update.update_id, BG);
 	if (reason !== undefined) return logDuplicate(scope, reason);
@@ -63,12 +69,14 @@ async function route(rt: ChannelRuntime, update: Update): Promise<void> {
 
 async function scopeFor(rt: ChannelRuntime, message: Message, updateId: number): Promise<MessageScope> {
 	const chatId = message.chat.id;
-	const conversation = await rt.directory.get(chatId, BG);
+	const threadId = message.message_thread_id;
+	const conversation = await rt.directory.get(chatId, BG, threadId);
 	return {
 		rt,
 		conversation,
 		message,
 		chatId,
+		...(threadId === undefined ? {} : { threadId }),
 		messageId: message.message_id,
 		updateId,
 		key: messageKey(chatId, message.message_id, message.date),
@@ -124,10 +132,10 @@ async function runCommand(scope: MessageScope, name: string, args: string): Prom
 }
 
 /** The stop button of a draft does what /stop does; the update id keeps a redelivered stop from running twice. */
-async function stopFromDraft(rt: ChannelRuntime, chatId: number, updateId: number): Promise<void> {
-	const conversation = await rt.directory.get(chatId, BG);
-	const scope = { rt, conversation, chatId, updateId, key: `tg:${chatId}:stop:${updateId}` };
-	detach(scope, "stop", () => runStop(scope));
+async function stopFromDraft(rt: ChannelRuntime, chatId: number, draftId: number, updateId: number): Promise<void> {
+	const draft = await draftScope(rt, chatId, draftId, updateId);
+	if (draft === undefined) return;
+	detach(draft.scope, "stop", () => runStop(draft.scope, draft.submissionId));
 }
 
 /** Commands that wait on durable work run outside the update handler, so polling (and a later /stop) continues. */
@@ -144,7 +152,13 @@ function detach(scope: Pick<MessageScope, "rt">, name: string, work: () => Promi
 async function admitContent(scope: MessageScope, text: string): Promise<boolean> {
 	const marker = forwardMarker(scope.message);
 	const content = (marker === undefined ? text : `${marker}\n${text}`) + (await replyContext(scope));
-	const input = { chatId: scope.chatId, messageId: scope.messageId, requestId: scope.key, content };
+	const input = {
+		chatId: scope.chatId,
+		messageId: scope.messageId,
+		requestId: scope.key,
+		content,
+		...(scope.threadId === undefined ? {} : { threadId: scope.threadId }),
+	};
 	const result = await admit(scope.conversation, scope.rt.deliver, input, BG, scope.updateId);
 	if (result === "admitted") scope.rt.log.info("message_admitted", { chat: scope.chatId, message: scope.messageId });
 	else logDuplicate(scope, "admitted_concurrently");

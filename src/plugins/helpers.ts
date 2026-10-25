@@ -78,7 +78,7 @@ async function runHelper(task: string, api: ToolExecutionApi, context: Context, 
 		if (existing !== undefined) return existing.id;
 		const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
 		await configure(tx, created.id, { ...settings.change, extensions: { remove: [self] } });
-		(await tx.doc(ChatInfo, created.id)).chatId = (await tx.doc(ChatInfo, api.conversationId)).chatId;
+		Object.assign(await tx.doc(ChatInfo, created.id), await tx.doc(ChatInfo, api.conversationId));
 		return created.id;
 	}, context);
 	await api.details({ conversationId: child }, context);

@@ -61,7 +61,11 @@ async function sendFile(
 	}
 	const caption = args.caption === undefined ? undefined : truncate(args.caption, CAPTION_LIMIT);
 	const asPhoto = await isSendablePhoto(located.path, located.size);
-	return upload({ chatId: chat.chatId, path: located.path, size: located.size, caption, asPhoto }, deps, context);
+	return upload(
+		{ chatId: chat.chatId, threadId: chat.threadId, path: located.path, size: located.size, caption, asPhoto },
+		deps,
+		context,
+	);
 }
 
 type Located = { path: string; size: number };
@@ -92,13 +96,20 @@ async function isSendablePhoto(path: string, size: number): Promise<boolean> {
 	}
 }
 
-type Upload = { chatId: number; path: string; size: number; caption: string | undefined; asPhoto: boolean };
+type Upload = {
+	chatId: number;
+	threadId?: number;
+	path: string;
+	size: number;
+	caption: string | undefined;
+	asPhoto: boolean;
+};
 
 async function upload(job: Upload, deps: SendFileDeps, context: Context): Promise<ToolExecutionResult> {
 	const port = deps.port();
 	const signal = context.abortSignal;
 	await port
-		.sendChatAction(job.chatId, job.asPhoto ? "upload_photo" : "upload_document", signal)
+		.sendChatAction(job.chatId, job.asPhoto ? "upload_photo" : "upload_document", signal, job.threadId)
 		.catch(() => undefined);
 	try {
 		const kind = await sendOnce(port, job, signal);
@@ -116,14 +127,14 @@ async function sendOnce(
 ): Promise<"photo" | "document"> {
 	if (job.asPhoto) {
 		try {
-			await port.sendPhoto(job.chatId, job.path, job.caption, signal);
+			await port.sendPhoto(job.chatId, job.path, job.caption, signal, job.threadId);
 			return "photo";
 		} catch (error) {
 			// Telegram rejects some valid images as photos (dimensions, format); a document always works.
 			if (classifyTelegramError(error).kind !== "rejected") throw error;
 		}
 	}
-	await port.sendDocument(job.chatId, job.path, job.caption, signal);
+	await port.sendDocument(job.chatId, job.path, job.caption, signal, job.threadId);
 	return "document";
 }
 

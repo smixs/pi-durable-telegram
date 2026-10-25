@@ -6,6 +6,8 @@ import type { TelegramPort } from "../telegram/port.ts";
 
 export type DeliverInput = {
 	chatId: number;
+	/** Telegram topic receiving the answer; absent for the main chat. */
+	threadId?: number;
 	/** The user's Telegram message; the answer replies to it. Absent for a wake that answers no message (a reminder). */
 	messageId?: number;
 	/** Durable request id of the submission: `tg:<chat>:<message>` (`remind:<id>:<due>` for a reminder). */

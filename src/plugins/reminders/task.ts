@@ -9,7 +9,7 @@ import { type Every, formatLocal, nextOccurrence } from "./time.ts";
 /** One pending reminder; `tz` and `wall` are fixed when it is set, so later occurrences keep the user's local time. */
 export type Reminder = { text: string; next: number; every?: Every; wall: string; tz: string; setAt: number };
 
-/** Pending reminders of a chat's main conversation, by id: what `list` shows and `cancel` removes. */
+/** Pending reminders of a topic's main conversation, by id: what `list` shows and `cancel` removes. */
 export const Reminders = defineDoc<{ items: Record<string, Reminder> }>({
 	kind: "tg.reminders",
 	version: 1,
@@ -47,7 +47,7 @@ async function fire(tx: Tx, runtime: Runtime, allowed: ReadonlySet<number>, id: 
 	const doc = await tx.doc(Reminders, runtime.conversationId);
 	const entry = Object.hasOwn(doc.items, id) ? doc.items[id] : undefined;
 	if (entry === undefined || entry.next !== due) return DONE;
-	const chatId = (await tx.doc(ChatInfo, runtime.conversationId)).chatId;
+	const { chatId, threadId } = await tx.doc(ChatInfo, runtime.conversationId);
 	const refused = refusal(runtime, chatId, allowed);
 	if (refused !== undefined) {
 		delete doc.items[id];
@@ -56,7 +56,12 @@ async function fire(tx: Tx, runtime: Runtime, allowed: ReadonlySet<number>, id: 
 	}
 	const deliver = runtime.registry.task(DELIVER_TASK) as unknown as DeliverTask;
 	const content = wakeNote(id, entry, due, runtime.now());
-	await admitIn(tx, runtime.conversationId, deliver, { chatId, requestId: `remind:${id}:${due}`, content });
+	await admitIn(tx, runtime.conversationId, deliver, {
+		chatId,
+		...(threadId === undefined ? {} : { threadId }),
+		requestId: `remind:${id}:${due}`,
+		content,
+	});
 	const next = nextOccurrence(entry, due, runtime.now());
 	if (next === undefined) {
 		delete doc.items[id];

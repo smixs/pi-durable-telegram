@@ -19,6 +19,12 @@ export function classifyMessage(message: Message): Classified {
 	return { kind: isSpeech(attachment) ? "voice" : "file" };
 }
 
+/** Creating or changing a topic is routing metadata, not a request for the model. */
+export function isTopicServiceOnly(message: Message): boolean {
+	if (message.text !== undefined || attachmentOf(message) !== undefined) return false;
+	return Object.keys(message).some((key) => key.startsWith("forum_topic_") || key.startsWith("general_forum_topic_"));
+}
+
 /** `/name@bot args` → command; anything else is text. */
 export function classifyText(text: string): Classified {
 	const match = /^\/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text.trim());

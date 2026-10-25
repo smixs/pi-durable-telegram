@@ -7,12 +7,13 @@ import { type CommandScope, reply } from "../scope.ts";
  * /stop and a draft's stop button: abort the task that owns the current run (and with it its tool tasks), not the conversation, so queued
  * messages stay; then a passive write gives the conversation a boundary to place them.
  */
-export async function runStop(scope: CommandScope): Promise<void> {
+export async function runStop(scope: CommandScope, expectedSubmissionId?: number): Promise<void> {
 	if (!(await recordKey(scope.conversation, scope.key, BG, scope.updateId))) return;
 	const { harness } = scope.rt;
 	const id = scope.conversation.id;
 	const live = async () => (await harness.snapshot(LiveDoc, id, BG))?.run;
 	const stopping = await live();
+	if (expectedSubmissionId !== undefined && !stopping?.inputs.some((id) => id === expectedSubmissionId)) return;
 	if (stopping === undefined) {
 		await reply(scope, "Nothing is running.");
 		return;

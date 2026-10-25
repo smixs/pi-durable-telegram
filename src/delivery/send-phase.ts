@@ -178,9 +178,12 @@ function rejected(job: Job, error: unknown): Sent {
 
 async function sendNew(job: Job, chunk: Chunk, first: boolean): Promise<Sent> {
 	const { port } = job;
-	const { chatId, messageId } = job.task.input;
+	const { chatId, messageId, threadId } = job.task.input;
 	const signal = job.runtime.signal;
-	const replyTo = first && messageId !== undefined ? { replyTo: messageId } : {};
+	const replyTo = {
+		...(first && messageId !== undefined ? { replyTo: messageId } : {}),
+		...(threadId === undefined ? {} : { threadId }),
+	};
 	if (chunk.rich !== undefined) {
 		const rich = chunk.rich;
 		return port.sendMessage(chatId, rich, { rich: true, ...replyTo }, signal).then(

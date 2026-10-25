@@ -18,6 +18,8 @@ export type Config = {
 	readonly telegramApiRoot: string;
 	/** `auto`: answers as rich messages with buttons and native drafts; `never`: HTML messages only. */
 	readonly telegramRich: "auto" | "never";
+	/** Automatically name implicit Telegram topics, or rename only when the user asks. */
+	readonly telegramTopicNames: "auto" | "manual";
 	readonly logLevel: LogLevel;
 	readonly contextCap: number | undefined;
 	/** `PI_PLUGINS`: built-in names, paths or npm package names, in load order. */
@@ -81,6 +83,13 @@ export function parseConfig(env: Env, defaults: ConfigDefaults = { cwd: process.
 	const deepgramApiKey = parseOptionalSecret("DEEPGRAM_API_KEY", env.DEEPGRAM_API_KEY, out);
 	const telegramApiRoot = parseApiRoot(env.TELEGRAM_API_ROOT, out);
 	const telegramRich = parseEnum("TELEGRAM_RICH", env.TELEGRAM_RICH, ["auto", "never"] as const, "auto", out);
+	const telegramTopicNames = parseEnum(
+		"TELEGRAM_TOPIC_NAMES",
+		env.TELEGRAM_TOPIC_NAMES,
+		["auto", "manual"] as const,
+		"auto",
+		out,
+	);
 	const logLevel = parseEnum("PI_LOG_LEVEL", env.PI_LOG_LEVEL, LOG_LEVELS, "info", out);
 	const contextCap = parseContextCap(env.PI_CONTEXT_CAP, out);
 	const plugins = parseList(env.PI_PLUGINS);
@@ -98,6 +107,7 @@ export function parseConfig(env: Env, defaults: ConfigDefaults = { cwd: process.
 		deepgramApiKey,
 		telegramApiRoot,
 		telegramRich,
+		telegramTopicNames,
 		logLevel,
 		contextCap,
 		plugins,

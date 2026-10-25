@@ -9,7 +9,7 @@ import {
 	type ToolRegistration,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { ChatInfo, ChatMap } from "../../channel/docs.ts";
+import { ChatInfo, ChatMap, chatKey } from "../../channel/docs.ts";
 import type { PluginContext } from "../load.ts";
 import { REMIND_TASK, type Reminder, Reminders, type ReminderTask } from "./task.ts";
 import { type Every, formatLocal, parseAt, parseEvery, serverZone, validZone, wallOf } from "./time.ts";
@@ -32,10 +32,10 @@ const PARAMETERS = {
 	required: ["op"],
 } as unknown as TSchema;
 
-/** Reminders live in the chat's main conversation, also when a helper sets them. */
+/** Reminders live in the topic's main conversation, also when a helper sets them. */
 async function rootOf(tx: Tx, conversationId: ConversationId): Promise<ConversationId> {
-	const chatId = (await tx.doc(ChatInfo, conversationId)).chatId;
-	return ((await tx.doc(ChatMap)).chats[String(chatId)] ?? conversationId) as ConversationId;
+	const chat = await tx.doc(ChatInfo, conversationId);
+	return ((await tx.doc(ChatMap)).chats[chatKey(chat.chatId, chat.threadId)] ?? conversationId) as ConversationId;
 }
 
 function dueOf(args: Args, now: number, tz: string): number {

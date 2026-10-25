@@ -70,6 +70,7 @@ export async function openAgent(config: Config, deps: OpenAgentDeps = {}): Promi
 		thinkingLevel: config.thinkingLevel,
 		apiRoot: config.telegramApiRoot,
 		rich: config.telegramRich === "auto",
+		topicNames: config.telegramTopicNames,
 		log,
 		models,
 		...optional({

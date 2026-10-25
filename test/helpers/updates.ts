@@ -7,7 +7,7 @@ export function textUpdate(
 	chatId: number,
 	messageId: number,
 	text: string,
-	options: { fromId?: number; chatType?: "private" | "group"; isBot?: boolean; date?: number } = {},
+	options: { fromId?: number; chatType?: "private" | "group"; isBot?: boolean; date?: number; threadId?: number } = {},
 ): Update {
 	const fromId = options.fromId ?? chatId;
 	const chat =
@@ -22,6 +22,7 @@ export function textUpdate(
 			chat,
 			from: { id: fromId, is_bot: options.isBot ?? false, first_name: "U" },
 			text,
+			...(options.threadId === undefined ? {} : { message_thread_id: options.threadId, is_topic_message: true }),
 		},
 	} as Update;
 }
@@ -88,7 +89,7 @@ export function callbackUpdate(
 	chatId: number,
 	messageId: number,
 	data: string,
-	options: { fromId?: number; queryId?: string; text?: string } = {},
+	options: { fromId?: number; queryId?: string; text?: string; threadId?: number } = {},
 ): Update {
 	return {
 		update_id: nextUpdateId++,
@@ -102,9 +103,16 @@ export function callbackUpdate(
 				date: DATE,
 				chat: { id: chatId, type: "private", first_name: "U" },
 				...(options.text === undefined ? {} : { text: options.text }),
+				...(options.threadId === undefined ? {} : { message_thread_id: options.threadId, is_topic_message: true }),
 			},
 		},
 	} as Update;
+}
+
+/** Put an incoming message (including attachments and topic service events) in a private-chat topic. */
+export function topicUpdate(update: Update, threadId: number): Update {
+	if (update.message === undefined) throw new Error("A topic update must contain a message");
+	return { ...update, message: { ...update.message, message_thread_id: threadId, is_topic_message: true } } as Update;
 }
 
 /** The user pressed the stop button of draft `draftId`. */

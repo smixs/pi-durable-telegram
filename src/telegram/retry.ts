@@ -10,6 +10,8 @@ const NON_IDEMPOTENT = new Set([
 	"sendMediaGroup",
 	"copyMessage",
 	"forwardMessage",
+	// An uncertain rename may have succeeded before a human changed the title; do not overwrite that change.
+	"editForumTopic",
 ]);
 const MAX_ATTEMPTS = 3;
 const MAX_WAIT_SECONDS = 30;

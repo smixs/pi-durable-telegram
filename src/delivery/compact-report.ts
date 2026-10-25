@@ -11,7 +11,7 @@ import { classifyTelegramError, telegramErrorSummary } from "../telegram/errors.
 import { guardPhase } from "./phase-guard.ts";
 import type { DeliveryDeps } from "./types.ts";
 
-export type CompactReportInput = { chatId: number; replyTo: number; compactionTaskId: number };
+export type CompactReportInput = { chatId: number; threadId?: number; replyTo: number; compactionTaskId: number };
 type State = { phase: "wait" } | { phase: "reply"; text: string; inFlight?: boolean };
 
 export const COMPACT_REPORT_TASK = "tg.compact-report";
@@ -62,7 +62,15 @@ export function createCompactReportTask(deps: DeliveryDeps) {
 						);
 						await deps
 							.port()
-							.sendMessage(task.input.chatId, text, { replyTo: task.input.replyTo }, runtime.signal)
+							.sendMessage(
+								task.input.chatId,
+								text,
+								{
+									replyTo: task.input.replyTo,
+									...(task.input.threadId === undefined ? {} : { threadId: task.input.threadId }),
+								},
+								runtime.signal,
+							)
 							.catch((error: unknown) => {
 								if (classifyTelegramError(error).kind === "aborted") throw error;
 								deps.log.warn("compact_reply_failed", telegramErrorSummary(error));

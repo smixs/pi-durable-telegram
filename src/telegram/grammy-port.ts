@@ -27,7 +27,7 @@ export function createGrammyPort(options: GrammyPortOptions): TelegramPort {
 		sendMessage: (chatId, text, o, signal) =>
 			o.rich === true
 				? guard("sendRichMessage", async () => {
-						const sent = await pick(o).sendRichMessage(chatId, { markdown: text }, replyExtra(o), gs(signal));
+						const sent = await pick(o).sendRichMessage(chatId, { markdown: text }, messageExtra(o), gs(signal));
 						return sent.message_id;
 					})
 				: guard(
@@ -45,27 +45,47 @@ export function createGrammyPort(options: GrammyPortOptions): TelegramPort {
 					gs(signal),
 				);
 			}),
-		sendDraft: (chatId, draftId, markdown, signal) =>
+		renameTopic: (chatId, threadId, name, signal) =>
+			guard("editForumTopic", async () => {
+				await api.editForumTopic(chatId, threadId, { name }, gs(signal));
+			}).catch((error: unknown) => {
+				if (
+					error instanceof TelegramApiError &&
+					error.code === 400 &&
+					/^(?:Bad Request:\s*)?TOPIC_NOT_MODIFIED$/i.test(error.description)
+				)
+					return;
+				throw error;
+			}),
+		sendDraft: (chatId, draftId, markdown, signal, threadId) =>
 			guard("sendRichMessageDraft", async () => {
-				await fast.sendRichMessageDraft(chatId, draftId, { markdown }, { can_stop: true }, gs(signal));
+				await fast.sendRichMessageDraft(
+					chatId,
+					draftId,
+					{ markdown },
+					{ can_stop: true, ...threadExtra(threadId) },
+					gs(signal),
+				);
 			}),
 		answerCallbackQuery: (queryId) =>
 			guard("answerCallbackQuery", async () => {
 				await fast.answerCallbackQuery(queryId);
 			}),
-		sendChatAction: (chatId, action: ChatAction, signal) =>
+		sendChatAction: (chatId, action: ChatAction, signal, threadId) =>
 			guard("sendChatAction", async () => {
-				await fast.sendChatAction(chatId, action, {}, gs(signal));
+				await fast.sendChatAction(chatId, action, threadExtra(threadId), gs(signal));
 			}),
-		sendPhoto: (chatId, path, caption, signal) =>
+		sendPhoto: (chatId, path, caption, signal, threadId) =>
 			guard(
 				"sendPhoto",
-				async () => (await api.sendPhoto(chatId, new InputFile(path), captionExtra(caption), gs(signal))).message_id,
+				async () =>
+					(await api.sendPhoto(chatId, new InputFile(path), captionExtra(caption, threadId), gs(signal))).message_id,
 			),
-		sendDocument: (chatId, path, caption, signal) =>
+		sendDocument: (chatId, path, caption, signal, threadId) =>
 			guard(
 				"sendDocument",
-				async () => (await api.sendDocument(chatId, new InputFile(path), captionExtra(caption), gs(signal))).message_id,
+				async () =>
+					(await api.sendDocument(chatId, new InputFile(path), captionExtra(caption, threadId), gs(signal))).message_id,
 			),
 		getFile: (fileId, signal) =>
 			guard("getFile", async () => {
@@ -91,7 +111,7 @@ function gs(signal: AbortSignal | undefined): GrammySignal {
 function sendExtra(options: SendOptions) {
 	return {
 		...(options.html === true ? { parse_mode: "HTML" as const } : {}),
-		...replyExtra(options),
+		...messageExtra(options),
 		link_preview_options: { is_disabled: true },
 	};
 }
@@ -102,8 +122,16 @@ function replyExtra(options: SendOptions) {
 		: { reply_parameters: { message_id: options.replyTo, allow_sending_without_reply: true } };
 }
 
-function captionExtra(caption: string | undefined) {
-	return caption === undefined || caption === "" ? {} : { caption };
+function threadExtra(threadId: number | undefined) {
+	return threadId === undefined ? {} : { message_thread_id: threadId };
+}
+
+function messageExtra(options: SendOptions) {
+	return { ...replyExtra(options), ...threadExtra(options.threadId) };
+}
+
+function captionExtra(caption: string | undefined, threadId: number | undefined) {
+	return { ...(caption === undefined || caption === "" ? {} : { caption }), ...threadExtra(threadId) };
 }
 
 async function guard<T>(method: string, call: () => Promise<T>): Promise<T> {

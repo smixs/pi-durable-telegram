@@ -18,6 +18,7 @@ variables win over the file). Invalid values stop the daemon at start with one l
 | `DEEPGRAM_API_KEY` | no | | Enables voice transcription |
 | `TELEGRAM_API_ROOT` | no | `https://api.telegram.org` | Bot API server (for a local Bot API server) |
 | `TELEGRAM_RICH` | no | `auto` | `auto`: answers are rich messages (tables, task lists, folds, buttons) streamed as native drafts with a stop button; `never`: Telegram HTML messages streamed by editing one message |
+| `TELEGRAM_TOPIC_NAMES` | no | `auto` | `auto`: the agent gives new topics with implicit Telegram titles a short task name; `manual`: rename only when asked. Explicit names and unknown titles of older topics are kept |
 | `PI_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn` or `error` |
 | `PI_PLUGINS` | no | none | Comma-separated plugins to load: `search`, `mcp`, `skills`, `helpers`, `reminders`, a path (absolute, `~` or relative to `PI_WORKDIR`) or an npm package installed in `<PI_DATA_DIR>/plugins`; see [plugins](plugins.md) |
 | `PI_SEARCH_PROVIDER` | no | first key found | `search` plugin: `tavily`, `exa`, `brave` or `parallel` |

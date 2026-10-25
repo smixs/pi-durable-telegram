@@ -56,12 +56,13 @@ async function streamUntilSettled(
 	deps: DeliveryDeps,
 ): Promise<SettledSubmissionRecord> {
 	const port = deps.port();
-	const { chatId, messageId } = task.input;
-	const typing = new TypingPulse(port, chatId, runtime.signal);
+	const { chatId, messageId, threadId } = task.input;
+	const typing = new TypingPulse(port, chatId, runtime.signal, threadId);
 	const draft = deps.rich === true && task.state.checkpoint.preview === undefined;
 	const preview = new PreviewStreamer({
 		port,
 		chatId,
+		...(threadId === undefined ? {} : { threadId }),
 		replyTo: messageId,
 		log: deps.log,
 		messageId: task.state.checkpoint.preview?.messageId,

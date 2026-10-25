@@ -11,14 +11,14 @@ flowchart LR
   D -- streamed answer --> B --> P
 ```
 
-The daemon long-polls Telegram, so there is no public HTTPS endpoint, domain or webhook to run. Each allowed chat maps
-to one pi-durable conversation. Your message becomes a durable submission, the harness runs model turns and tools as
+The daemon long-polls Telegram, so there is no public HTTPS endpoint, domain or webhook to run. Each topic in an
+allowed private chat maps to its own pi-durable conversation. Your message becomes a durable submission, the harness runs model turns and tools as
 checkpointed tasks, and the answer streams back as a native Telegram draft (or, where drafts are refused, one message
 edited about once per second) and is then sent as a rich message.
 
 ## Features in detail
 
-- **Durable conversations.** One pi-durable conversation per allowed chat, stored in SQLite. After a crash or a
+- **Durable conversations.** One pi-durable conversation per private-chat topic, stored in SQLite. After a crash or a
   restart, unfinished runs resume and their answers are delivered once. Telegram delivery state is durable too, and
   redelivered Telegram updates are never submitted twice.
 - **Streaming.** A run shows a "Thinking…" draft (`sendRichMessageDraft`), then streams the answer and short tool
@@ -36,6 +36,15 @@ edited about once per second) and is then sent as a rich message.
   outside any row disables all of the message's choices). There is no waiting state: typing instead of tapping is just a
   message, and buttons keep working after a restart (old ones may just stay unmarked).
 - **Queueing.** Messages sent while the agent works are queued and answered in order. Nothing is dropped.
+- **Parallel topics.** Enable Threaded Mode in @BotFather to keep independent tasks in topics of the same private
+  chat. Context, queues, commands, drafts, files, buttons and reminders stay in their topic. Different topics can run
+  at the same time. Existing topic-less chat history is kept. All topics share `PI_WORKDIR` and the service user's
+  permissions; use separate working copies for concurrent edits to the same project.
+- **Topic names.** With `TELEGRAM_TOPIC_NAMES=auto` (the default), the agent names a new topic once its task is clear,
+  using `telegram_rename_topic` during the normal answer. Only names observed as implicit in Telegram's creation
+  event qualify; manual names and older topics with unknown names are kept. Ask the agent to rename any topic
+  explicitly, or set `TELEGRAM_TOPIC_NAMES=manual` to disable automatic naming. An interrupted or failed automatic
+  rename is not repeated after a restart; check the visible title before retrying it yourself.
 - **Commands.** `/new`, `/stop`, `/compact`, `/status`, `/help`. `/new` drops what was still waiting for an answer
   and says so: its reply names the stopped run and the first words of each dropped message.
 - **Anything you send reaches the agent.** Photos, documents, videos, animations and stickers (up to 20 MB, the Bot
@@ -77,7 +86,7 @@ adds the Telegram side of the same promise:
 | Where the agent runs | A systemd service on your server | Inside an open interactive pi session | A terminal session you keep alive |
 | Survives a crash or restart mid-answer | Yes, the run resumes and the answer is delivered | No | No |
 | Reach it from the phone | Telegram | Telegram | An SSH client |
-| History | Durable SQLite per chat, background compaction | pi session files | pi session files |
+| History | Durable SQLite per topic, background compaction | pi session files | pi session files |
 | Best for | An always-on personal agent | Continuing a desktop pi session from the phone | Occasional remote work |
 
 ---

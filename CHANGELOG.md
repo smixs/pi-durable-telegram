@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Private-chat topics have independent conversations and queues, so tasks in different topics run in parallel.
+  Enable Threaded Mode in @BotFather; existing topic-less conversations keep their history. Replies, drafts,
+  commands, buttons, files, helper agents and reminders stay in their originating topic. Topics share the same
+  working directory and server permissions.
+- The agent names new topics with Telegram-generated titles once their task is clear, and can rename the current
+  topic on request. Explicit names are kept; `TELEGRAM_TOPIC_NAMES=manual` disables automatic naming. An interrupted
+  rename is not replayed blindly after a restart.
+
 ## 0.1.8 (2026-10-24)
 
 - Replies carry the original message text or media caption as context; selected Telegram quotes take priority.

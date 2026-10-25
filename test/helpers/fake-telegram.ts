@@ -5,6 +5,7 @@ import type { BotCommandSpec, ChatAction, SendOptions, TelegramPort } from "../.
 export type FakeMessage = {
 	id: number;
 	chatId: number;
+	threadId?: number;
 	text: string;
 	html: boolean;
 	rich?: boolean;
@@ -13,7 +14,14 @@ export type FakeMessage = {
 	path?: string;
 	caption?: string;
 };
-export type FakeCall = { method: string; chatId?: number; messageId?: number; text?: string; options?: SendOptions };
+export type FakeCall = {
+	method: string;
+	chatId?: number;
+	threadId?: number;
+	messageId?: number;
+	text?: string;
+	options?: SendOptions;
+};
 type Hook = (call: FakeCall, signal: AbortSignal | undefined) => Promise<void> | void;
 
 /** In-memory Telegram: keeps the current text of every message, records calls, and can be scripted to fail or block. */
@@ -22,7 +30,8 @@ export class FakeTelegram implements TelegramPort {
 	readonly calls: FakeCall[] = [];
 	readonly files = new Map<string, Uint8Array>();
 	/** Draft frames shown, in order, per chat. */
-	readonly drafts: { chatId: number; draftId: number; markdown: string }[] = [];
+	readonly drafts: { chatId: number; threadId?: number; draftId: number; markdown: string }[] = [];
+	readonly renamedTopics: { chatId: number; threadId: number; name: string }[] = [];
 	readonly answeredQueries: string[] = [];
 	commands: readonly BotCommandSpec[] = [];
 	#nextId = 1000;
@@ -54,12 +63,13 @@ export class FakeTelegram implements TelegramPort {
 	}
 
 	async sendMessage(chatId: number, text: string, options: SendOptions, signal?: AbortSignal): Promise<number> {
-		await this.#enter({ method: "sendMessage", chatId, text, options }, signal);
+		await this.#enter({ method: "sendMessage", chatId, text, options, ...threadExtra(options.threadId) }, signal);
 		checkHtml(text, options);
 		const id = this.#nextId++;
 		this.messages.set(id, {
 			id,
 			chatId,
+			...threadExtra(options.threadId),
 			text,
 			html: options.html === true,
 			...(options.rich === true ? { rich: true } : {}),
@@ -88,9 +98,23 @@ export class FakeTelegram implements TelegramPort {
 		message.rich = options.rich === true;
 	}
 
-	async sendDraft(chatId: number, draftId: number, markdown: string, signal?: AbortSignal): Promise<void> {
-		await this.#enter({ method: "sendDraft", chatId, messageId: draftId, text: markdown }, signal);
-		this.drafts.push({ chatId, draftId, markdown });
+	async sendDraft(
+		chatId: number,
+		draftId: number,
+		markdown: string,
+		signal?: AbortSignal,
+		threadId?: number,
+	): Promise<void> {
+		await this.#enter(
+			{ method: "sendDraft", chatId, messageId: draftId, text: markdown, ...threadExtra(threadId) },
+			signal,
+		);
+		this.drafts.push({ chatId, draftId, markdown, ...threadExtra(threadId) });
+	}
+
+	async renameTopic(chatId: number, threadId: number, name: string, signal?: AbortSignal): Promise<void> {
+		await this.#enter({ method: "renameTopic", chatId, threadId, text: name }, signal);
+		this.renamedTopics.push({ chatId, threadId, name });
 	}
 
 	async answerCallbackQuery(queryId: string): Promise<void> {
@@ -98,16 +122,23 @@ export class FakeTelegram implements TelegramPort {
 		this.answeredQueries.push(queryId);
 	}
 
-	async sendChatAction(chatId: number, action: ChatAction, signal?: AbortSignal): Promise<void> {
-		await this.#enter({ method: "sendChatAction", chatId, text: action }, signal);
+	async sendChatAction(chatId: number, action: ChatAction, signal?: AbortSignal, threadId?: number): Promise<void> {
+		await this.#enter({ method: "sendChatAction", chatId, text: action, ...threadExtra(threadId) }, signal);
 	}
 
-	async sendPhoto(chatId: number, path: string, caption: string | undefined, signal?: AbortSignal): Promise<number> {
-		await this.#enter({ method: "sendPhoto", chatId, text: path }, signal);
+	async sendPhoto(
+		chatId: number,
+		path: string,
+		caption: string | undefined,
+		signal?: AbortSignal,
+		threadId?: number,
+	): Promise<number> {
+		await this.#enter({ method: "sendPhoto", chatId, text: path, ...threadExtra(threadId) }, signal);
 		const id = this.#nextId++;
 		this.messages.set(id, {
 			id,
 			chatId,
+			...threadExtra(threadId),
 			text: caption ?? "",
 			html: false,
 			kind: "photo",
@@ -117,10 +148,24 @@ export class FakeTelegram implements TelegramPort {
 		return id;
 	}
 
-	async sendDocument(chatId: number, path: string, caption: string | undefined, signal?: AbortSignal): Promise<number> {
-		await this.#enter({ method: "sendDocument", chatId, text: path }, signal);
+	async sendDocument(
+		chatId: number,
+		path: string,
+		caption: string | undefined,
+		signal?: AbortSignal,
+		threadId?: number,
+	): Promise<number> {
+		await this.#enter({ method: "sendDocument", chatId, text: path, ...threadExtra(threadId) }, signal);
 		const id = this.#nextId++;
-		this.messages.set(id, { id, chatId, text: caption ?? "", html: false, kind: "document", path });
+		this.messages.set(id, {
+			id,
+			chatId,
+			text: caption ?? "",
+			html: false,
+			kind: "document",
+			path,
+			...threadExtra(threadId),
+		});
 		return id;
 	}
 
@@ -145,6 +190,10 @@ export class FakeTelegram implements TelegramPort {
 	async addFileFromDisk(fileId: string, path: string): Promise<void> {
 		this.files.set(fileId, await readFile(path));
 	}
+}
+
+function threadExtra(threadId: number | undefined) {
+	return threadId === undefined ? {} : { threadId };
 }
 
 /** Reject unbalanced HTML the way Telegram does, so parse fallbacks can be exercised. */

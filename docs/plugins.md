@@ -91,7 +91,7 @@ away.
 ## Helpers: `helpers`
 
 Gives the agent a `helper` tool: it hands a self-contained task to a helper agent and gets the helper's final answer
-back as the tool result. A helper has the same tools as the main agent (bash, files, `telegram_send_file`, search,
+back as the tool result. A helper has the same tools as the main agent (bash, files, Telegram, search,
 MCP, reminders), except `helper` itself, so helpers cannot start helpers. A helper does not see the chat: the task
 text is all it knows. Several helper calls in one answer run at the same time.
 
@@ -99,12 +99,13 @@ text is all it knows. Several helper calls in one answer run at the same time.
 |---|---|---|
 | `PI_HELPER_MODEL` | the main model | `provider/model` for helpers, with the ids you would put in `PI_PROVIDER` and `PI_MODEL`. Another provider needs its own `login`. |
 | `PI_HELPER_THINKING` | the main level; `off` with `PI_HELPER_MODEL` | thinking level of helpers |
-| `PI_HELPERS_MAX` | 4 | helper calls running at once per chat; a call over the limit comes back to the model as an error asking it to wait for the running ones |
+| `PI_HELPERS_MAX` | 4 | helper calls running at once per topic; a call over the limit comes back to the model as an error asking it to wait for the running ones |
 
 - A bad `PI_HELPER_MODEL` or `PI_HELPER_THINKING` is reported as a plugin problem; helpers then use the main model.
 - `/stop` and the stop button of a draft stop the helpers together with the answer.
 - After a restart a running helper goes on in the same helper conversation, and its task is not sent to it again.
-  The limit is counted in memory per running service.
+- The `PI_HELPERS_MAX` limit is tracked per topic in the running service's memory.
+- Helpers can rename their originating topic on request, but do not automatically name it from a delegated task.
 - Helper spend is in the "All chats" line of `/status`, not in "This chat".
 
 ## Reminders: `reminders`
@@ -121,11 +122,12 @@ with ids and next times) and `cancel` (by id). When a reminder comes due, the ag
 - A repeating reminder keeps its local time across daylight saving changes. A time skipped by the clock change is
   refused for `add`; a repeat that falls into it moves past it that day. A daily, weekday or weekly reminder fires at
   most once per local date, also on the day the clock goes back.
-- At most 100 pending reminders per chat, at most 366 days ahead. `cancel` ends the reminder at once.
+- At most 100 pending reminders per topic, at most 366 days ahead. `cancel` ends the reminder at once.
 - Reminders are stored durably. After a restart they wait again; one missed while the service was down fires once
   after start, marked late; a repeating one fires once and then goes on from its next time, it does not catch up every
   missed time. Each due time wakes the agent at most once, even across restarts.
-- `/new` keeps reminders. A reminder set by a helper goes to the main chat.
+- `/new` keeps reminders. A reminder set by a helper belongs to its originating topic's main conversation and wakes
+  that topic. Each topic lists and cancels its own reminders.
 - With `reminders` removed from `PI_PLUGINS`, a pending reminder is dropped at its due time without waking the agent
   (the log says `reminder … dropped`). The service always starts. The same happens to a reminder of a user taken off
   `TELEGRAM_ALLOWED_USER_IDS`: it never wakes the agent or reaches that chat again.
@@ -169,8 +171,9 @@ The context:
 Rules:
 
 - `parameters` is a JSON Schema object. A thrown error becomes an error result the model reads.
-- Tool and extension names must not repeat the core ones (`read`, `write`, `edit`, `bash`, `telegram_send_file`) or
-  another plugin's; such a plugin is not loaded. The same goes for section keys (core: `preamble`, `agents_md`).
+- Tool and extension names must not repeat the core ones (`read`, `write`, `edit`, `bash`, `telegram_send_file`,
+  `telegram_rename_topic`) or another plugin's; such a plugin is not loaded. The same goes for section keys
+  (core: `preamble`, `agents_md`, `telegram_topic`).
   A section key is lowercase letters, digits, `-` and `_`, starting with a letter. To change a core tool or section on
   purpose, use pi-durable's `wraps`.
 - A tool is not rerun after a restart unless it says `replay: "safe"`; set that only for tools that are safe to repeat.
