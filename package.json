@@ -1,6 +1,6 @@
 {
   "name": "pi-durable-telegram",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Always-on durable pi agent on your server that you talk to in Telegram: a pi-durable Telegram gateway that survives crashes and restarts",
   "license": "MIT",
   "author": "smixs",
@@ -57,10 +57,11 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-durable": "1.2.0",
-    "@earendil-works/pi-mcp": "1.2.0",
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
     "grammy": "1.46.0",
     "proper-lockfile": "4.1.2"
   },
@@ -72,8 +73,8 @@
     "typescript": "7.0.2"
   },
   "overrides": {
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/chord": "1.2.0"
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/chord": "1.5.0"
   },
   "homepage": "https://github.com/smixs/pi-durable-telegram#readme",
   "bugs": {

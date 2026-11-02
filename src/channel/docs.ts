@@ -4,6 +4,7 @@ import { defineDoc } from "@earendil-works/pi-durable";
 export const ChatMap = defineDoc<{ chats: Record<string, number> }>({
 	kind: "tg.chats",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "session",
 	initial: () => ({ chats: {} }),
 });
@@ -12,6 +13,7 @@ export const ChatMap = defineDoc<{ chats: Record<string, number> }>({
 export const ChatInfo = defineDoc<{ chatId: number }>({
 	kind: "tg.chat",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
@@ -26,6 +28,7 @@ export const ChatInfo = defineDoc<{ chatId: number }>({
 export const Intake = defineDoc<{ keys: string[] }>({
 	kind: "tg.intake",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
@@ -43,6 +46,7 @@ export const Delivered = defineDoc<{
 }>({
 	kind: "tg.delivered",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
@@ -55,6 +59,7 @@ export const DELIVERED_RING_SIZE = 500;
 export const Buttons = defineDoc<{ messages: Record<string, string>; order: number[] }>({
 	kind: "tg.buttons",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",

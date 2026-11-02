@@ -108,3 +108,9 @@ Your workspace `~/pi-agent` and pi itself are left alone; remove them yourself i
 ---
 
 Back to the [README](../README.md).
+
+## Upgrading from 0.1.8 or earlier
+
+Version 0.1.9 uses pi-durable 1.5.0. Its first open automatically migrates SQLite storage to schema v2. Stop the
+service and copy the data directory before the first start. A rollback to a version using pi 1.3.0 or earlier requires
+restoring that copy; keep the upgraded database with 0.1.9.

@@ -1,13 +1,13 @@
 import { open, realpath, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
 import {
 	defineTool,
 	type ToolExecutionApi,
 	type ToolExecutionResult,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 import { probeImage } from "../agent/tools/image-probe.ts";
 import { ChatInfo } from "../channel/docs.ts";
 import { truncate } from "../format/escape.ts";
@@ -21,10 +21,13 @@ const CAPTION_LIMIT = 1024;
 
 type SendFileDeps = { readonly port: () => TelegramPort; readonly log: Logger; readonly uploadLimit?: number };
 
-const parameters = Type.Object({
-	path: Type.String({ description: "File path, absolute or relative to the working directory" }),
-	caption: Type.Optional(Type.String({ description: "Optional caption, plain text, up to 1024 characters" })),
-});
+const parameters = obj(
+	{
+		path: str({ description: "File path, absolute or relative to the working directory" }),
+		caption: opt(str({ description: "Optional caption, plain text, up to 1024 characters" })),
+	},
+	{ open: true },
+);
 
 /** `telegram_send_file`: send a workspace file to the conversation's Telegram chat, as a photo when it is one. */
 export function createSendFileTool(deps: SendFileDeps): ToolRegistration {

@@ -20,7 +20,17 @@ test("unanswered text table", () => {
 	assert.match(unansweredText("faulted", "boom", model) ?? "", /Internal error: boom/);
 	assert.match(unansweredText("reset", undefined, model) ?? "", /reset/);
 	assert.match(unansweredText("orphaned", undefined, model) ?? "", /not answered \(orphaned\)/);
-	assert.ok(stallsQueue("model_error") && !stallsQueue("aborted"));
+	for (const reason of [
+		"model_error",
+		"faulted",
+		"no_model",
+		"interrupted",
+		"restart_limit",
+		"turn_limit",
+		"nothing_to_answer",
+	])
+		assert.ok(stallsQueue(reason), reason);
+	assert.ok(!stallsQueue("aborted"));
 });
 
 test("details are trimmed to one redacted line", () => {

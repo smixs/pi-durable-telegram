@@ -177,7 +177,7 @@ class Lifecycle {
 		this.#rt = rt;
 		// A failed Session aborts running work before it can report; this is the one place it becomes fatal.
 		void harness.closed.then((end) => {
-			if (end.reason === "failed") this.#d.onFatal("storage failure", end.error);
+			if (end.kind === "failed") this.#d.onFatal("storage failure", end.error);
 		});
 		const changed = await rt.directory.reconfigureAll(context);
 		if (changed > 0) this.#d.log.info("chats_reconfigured", { count: changed });

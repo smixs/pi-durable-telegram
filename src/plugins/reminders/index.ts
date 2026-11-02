@@ -1,5 +1,4 @@
 import type { Context } from "@earendil-works/chord";
-import type { TSchema } from "@earendil-works/pi-ai";
 import {
 	type ConversationId,
 	defineExtension,
@@ -9,6 +8,7 @@ import {
 	type ToolRegistration,
 	type Tx,
 } from "@earendil-works/pi-durable";
+import type { Schema } from "@earendil-works/pi-schema";
 import { ChatInfo, ChatMap } from "../../channel/docs.ts";
 import type { PluginContext } from "../load.ts";
 import { REMIND_TASK, type Reminder, Reminders, type ReminderTask } from "./task.ts";
@@ -16,7 +16,11 @@ import { type Every, formatLocal, parseAt, parseEvery, serverZone, validZone, wa
 
 export const MAX_PENDING = 100;
 const MAX_AHEAD_MS = 366 * 24 * 60 * 60_000;
-type Options = { readonly tz: string; readonly now: () => number };
+type Options = {
+	readonly tz: string;
+	readonly now: () => number;
+	readonly cancelReminder: PluginContext["cancelReminder"];
+};
 type Args = { op: string; text?: string; at?: string; in?: number; every?: string; id?: string };
 
 const PARAMETERS = {
@@ -30,7 +34,7 @@ const PARAMETERS = {
 		id: { type: "string", description: "cancel: the reminder id from list" },
 	},
 	required: ["op"],
-} as unknown as TSchema;
+} as Schema;
 
 /** Reminders live in the chat's main conversation, also when a helper sets them. */
 async function rootOf(tx: Tx, conversationId: ConversationId): Promise<ConversationId> {
@@ -87,16 +91,20 @@ async function list(api: ToolExecutionApi, context: Context, options: Options): 
 	return [head, ...(lines.length > 0 ? lines : ["No reminders."])].join("\n");
 }
 
-async function cancel(args: Args, api: ToolExecutionApi, context: Context): Promise<string> {
+async function cancel(args: Args, api: ToolExecutionApi, context: Context, options: Options): Promise<string> {
 	const id = args.id?.trim() ?? "";
-	const text = await api.commit(async (tx) => {
-		const doc = await tx.doc(Reminders, await rootOf(tx, api.conversationId));
-		const found = Object.hasOwn(doc.items, id) ? doc.items[id]?.text : undefined;
-		delete doc.items[id];
-		return found;
+	const entry = await api.commit(async (tx) => {
+		const root = await rootOf(tx, api.conversationId);
+		const doc = await tx.doc(Reminders, root);
+		const text = Object.hasOwn(doc.items, id) ? doc.items[id]?.text : undefined;
+		return { root, text };
 	}, context);
-	if (text === undefined) throw new Error(`no reminder ${JSON.stringify(id)}; see op list`);
-	return `Cancelled ${id}: ${text}`;
+	if (entry.text === undefined) throw new Error(`no reminder ${JSON.stringify(id)}; see op list`);
+	await options.cancelReminder(entry.root, id, context);
+	await api.commit(async (tx) => {
+		delete (await tx.doc(Reminders, entry.root)).items[id];
+	}, context);
+	return `Cancelled ${id}: ${entry.text}`;
 }
 
 const SECTION = [
@@ -118,7 +126,7 @@ export function createRemindersExtension(options: Options): Extension {
 				args.op === "add"
 					? await add(args, api, context, options)
 					: args.op === "cancel"
-						? await cancel(args, api, context)
+						? await cancel(args, api, context, options)
 						: await list(api, context, options);
 			return { output: [{ type: "text", text }] };
 		},
@@ -135,5 +143,5 @@ export default function remindersPlugin(ctx: PluginContext): Extension {
 	const wanted = ctx.env.PI_TIMEZONE?.trim();
 	const tz = wanted && validZone(wanted) ? wanted : serverZone();
 	if (wanted && tz !== wanted) ctx.problem(`PI_TIMEZONE=${wanted} is not a time zone; using ${tz}`);
-	return createRemindersExtension({ tz, now: ctx.now });
+	return createRemindersExtension({ tz, now: ctx.now, cancelReminder: ctx.cancelReminder });
 }

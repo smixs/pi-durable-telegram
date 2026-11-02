@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import { type ModelThinkingLevel, Type } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	type AgentChange,
 	AssistantEntry,
@@ -10,6 +10,7 @@ import {
 	type Extension,
 	type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { obj, str } from "@earendil-works/pi-schema";
 import { resolveModel } from "../agent/models.ts";
 import { loadProvider } from "../agent/providers.ts";
 import { ChatInfo } from "../channel/docs.ts";
@@ -110,9 +111,12 @@ export function createHelpersExtension(settings: Settings): Extension {
 					"Give a self-contained task to a helper agent with the same tools and get its final answer. The helper does " +
 					"not see this chat: put everything it needs into task. Several helper calls in one turn run in parallel, " +
 					`at most ${settings.max} at a time.`,
-				parameters: Type.Object({
-					task: Type.String({ minLength: 1, description: "The whole task, with all the context it needs" }),
-				}),
+				parameters: obj(
+					{
+						task: str({ minLength: 1, description: "The whole task, with all the context it needs" }),
+					},
+					{ open: true },
+				),
 				replay: "safe",
 				execute: async ({ task }, api, context) => {
 					const count = running.get(api.conversationId) ?? 0;

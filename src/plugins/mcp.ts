@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import type { TSchema } from "@earendil-works/pi-ai";
 import { defineExtension, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
 import {
 	McpAuthRequiredError,
@@ -10,6 +9,7 @@ import {
 	type Tool,
 	toLlmContent,
 } from "@earendil-works/pi-mcp";
+import type { Schema } from "@earendil-works/pi-schema";
 import { buildSafeEnv } from "../agent/tools/bash.ts";
 import { errorSummary } from "../runtime/log.ts";
 import { packageVersion } from "../runtime/version.ts";
@@ -70,7 +70,7 @@ function toTool(server: string, client: McpClient, tool: Tool): ToolRegistration
 	return {
 		name: mcpToolName(server, tool.name),
 		description: `[${server}] ${tool.description ?? tool.title ?? tool.name}`,
-		parameters: { ...schema, type: "object", properties: schema.properties ?? {} } as unknown as TSchema,
+		parameters: { ...schema, type: "object", properties: schema.properties ?? {} } as Schema,
 		replay: "unsafe",
 		execute: async (args, _api, context) => {
 			const options = { timeoutMs: 300_000, ...(context.abortSignal ? { signal: context.abortSignal } : {}) };

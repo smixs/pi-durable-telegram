@@ -64,5 +64,13 @@ function modelErrorText(detail: string, provider: string): string {
 
 /** Reasons after which queued messages stay in the inbox until something places them. */
 export function stallsQueue(reason: string): boolean {
-	return reason === "model_error" || reason === "faulted" || reason === "no_model";
+	return [
+		"model_error",
+		"faulted",
+		"no_model",
+		"interrupted",
+		"restart_limit",
+		"turn_limit",
+		"nothing_to_answer",
+	].includes(reason);
 }

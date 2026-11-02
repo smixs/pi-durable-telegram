@@ -163,6 +163,7 @@ The context:
 | `log` | the service log: `ctx.log.info("event", { key: "value" })` |
 | `models` | pi-ai's model catalog: register another provider here |
 | `now()` | the service clock, in milliseconds |
+| `cancelReminder(conversationId, id, context)` | end the core task of a reminder, including a durable sleep; used by the built-in reminders plugin |
 | `problem(text)` | report a part that failed while the rest works (one chat line, listed in `/status`) |
 | `onClose(fn)` | run `fn` at shutdown, for example to stop a child process |
 

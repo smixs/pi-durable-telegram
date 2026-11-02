@@ -1,7 +1,8 @@
 import { join } from "node:path";
+import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { AuthContext, MutableModels } from "@earendil-works/pi-ai";
-import { createRegistry, Harness } from "@earendil-works/pi-durable";
+import { type ConversationId, createRegistry, Harness } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { FileCredentialStore } from "../auth/credential-store.ts";
@@ -10,6 +11,7 @@ import type { Config } from "../config/schema.ts";
 import { createDeepgramStt } from "../media/deepgram.ts";
 import type { Stt } from "../media/stt.ts";
 import { type LoadedPlugins, loadPlugins } from "../plugins/load.ts";
+import { cancelReminderTask } from "../plugins/reminders/task.ts";
 import type { FatalHandler } from "../runtime/fatal.ts";
 import { errorSummary, type Logger, silentLogger } from "../runtime/log.ts";
 import { ensurePrivateDir, makePrivate } from "../runtime/private-dir.ts";
@@ -92,7 +94,17 @@ export async function openAgent(config: Config, deps: OpenAgentDeps = {}): Promi
 	const names = [...snapshot.installed(), ...snapshot.tools().map((entry) => entry.tool)].map((x) => x.name);
 	const taken = new Set([...names, ...snapshot.sections().map((entry) => `section:${entry.section.key}`)]);
 	const env = deps.pluginEnv ?? process.env;
-	const base = { env, workdir: config.workdir, dataDir: config.dataDir, log, models, now: deps.now ?? Date.now };
+	let harness: Harness;
+	const base = {
+		cancelReminder: (conversationId: ConversationId, id: string, context: Context) =>
+			cancelReminderTask(harness, conversationId, id, context),
+		env,
+		workdir: config.workdir,
+		dataDir: config.dataDir,
+		log,
+		models,
+		now: deps.now ?? Date.now,
+	};
 	const plugins = await loadPlugins(config.plugins, base, taken, (extension) => registry.install(extension));
 	const database = join(config.dataDir, DATABASE_FILE);
 	const failed = async (error: unknown): Promise<never> => {
@@ -101,14 +113,14 @@ export async function openAgent(config: Config, deps: OpenAgentDeps = {}): Promi
 	};
 	const storage = await openNodeSqliteStorage(database).catch(failed);
 	await makePrivate([database, `${database}-wal`, `${database}-shm`]).catch(failed);
-	const harness = await Harness.open(
+	harness = await Harness.open(
 		storage,
 		{
 			models,
 			registry,
 			settings: createSettings({ ...optional({ contextCap: config.contextCap }), contextWindow: model.contextWindow }),
 			env: (target) => new NodeExecutionEnv({ cwd: target.cwd ?? config.workdir }),
-			onReport: (error) => log.warn("harness_report", { error: errorSummary(error) }),
+			onReport: (report) => log.warn("harness_report", { kind: report.kind, error: errorSummary(report.error) }),
 			...optional({ now: deps.now }),
 		},
 		BG,

@@ -2,8 +2,9 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Context } from "@earendil-works/chord";
 import type { MutableModels } from "@earendil-works/pi-ai";
-import type { Extension } from "@earendil-works/pi-durable";
+import type { ConversationId, Extension } from "@earendil-works/pi-durable";
 import { errorSummary, type Logger } from "../runtime/log.ts";
 
 export type PluginContext = {
@@ -16,6 +17,8 @@ export type PluginContext = {
 	readonly models: MutableModels;
 	/** The harness clock. */
 	readonly now: () => number;
+	/** Cancel the core task of this chat's reminder, including a durable sleep. */
+	readonly cancelReminder: (conversationId: ConversationId, id: string, context: Context) => Promise<void>;
 	/** A part of the plugin failed while the rest works: logged, told once in chat, listed in /status. */
 	readonly problem: (text: string) => void;
 	/** Runs at shutdown, after the harness has closed. */

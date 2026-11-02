@@ -74,8 +74,9 @@ async function streamUntilSettled(
 	});
 	const tracker = new LiveTracker(submission.id);
 	const watch = await runtime.watchDoc(LiveDoc, runtime.conversationId, context);
-	watch?.start(async (value) => {
-		const frame = tracker.update(value);
+	watch?.start(async (call) => {
+		if (call.kind !== "value" || call.retired) return;
+		const frame = tracker.update(call.value);
 		typing.set(frame.mine);
 		if (frame.mine) preview.push(frame);
 	});

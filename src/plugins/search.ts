@@ -1,5 +1,5 @@
-import type { TSchema } from "@earendil-works/pi-ai";
 import { defineExtension, type Extension, section, type ToolRegistration } from "@earendil-works/pi-durable";
+import type { Schema } from "@earendil-works/pi-schema";
 import { errorSummary } from "../runtime/log.ts";
 import type { PluginContext } from "./load.ts";
 
@@ -136,7 +136,7 @@ const PARAMETERS = {
 		count: { type: "integer", minimum: 1, maximum: 10, description: "Number of results, default 5" },
 	},
 	required: ["query"],
-} as unknown as TSchema;
+} as Schema;
 
 type Args = { query: string; count?: number };
 

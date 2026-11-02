@@ -1,6 +1,13 @@
 import type { Context } from "@earendil-works/chord";
-import { withCancel } from "@earendil-works/chord/context";
-import { defineDoc, defineTask, type NextTaskState, type TaskRuntime, type Tx } from "@earendil-works/pi-durable";
+import {
+	type ConversationId,
+	defineDoc,
+	defineTask,
+	type Harness,
+	type NextTaskState,
+	type TaskRuntime,
+	type Tx,
+} from "@earendil-works/pi-durable";
 import { ChatInfo } from "../../channel/docs.ts";
 import { admitIn } from "../../channel/intake.ts";
 import { DELIVER_TASK, type DeliverTask } from "../../delivery/task.ts";
@@ -13,6 +20,7 @@ export type Reminder = { text: string; next: number; every?: Every; wall: string
 export const Reminders = defineDoc<{ items: Record<string, Reminder> }>({
 	kind: "tg.reminders",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
@@ -66,24 +74,6 @@ async function fire(tx: Tx, runtime: Runtime, allowed: ReadonlySet<number>, id: 
 	return { status: "running", checkpoint: { phase: "wait", due: next } };
 }
 
-/** Sleep until `due`, or less: a cancel or another change of the entry wakes the task early, and `fire` ends it. */
-async function sleepUnlessChanged(runtime: Runtime, id: string, due: number, context: Context): Promise<void> {
-	const pending = (doc: { readonly items: Readonly<Record<string, Reminder>> } | null) =>
-		doc !== null && Object.hasOwn(doc.items, id) && doc.items[id]?.next === due;
-	const early = withCancel(context);
-	const watch = await runtime.watchDoc(Reminders, runtime.conversationId, context);
-	watch?.start(async (doc) => {
-		if (!pending(doc)) early.cancel();
-	});
-	try {
-		if (watch !== undefined && pending(watch.value)) await runtime.sleep(due, early.context);
-	} catch (error) {
-		if (context.abortSignal?.aborted === true || early.context.abortSignal?.aborted !== true) throw error;
-	} finally {
-		await watch?.stop();
-	}
-}
-
 /**
  * One background, conversation-owned task per reminder: it sleeps until the due time on the harness clock, and after a
  * restart sleeps again from its checkpoint (or fires at once, late). Registered by core whether or not the reminders
@@ -97,7 +87,11 @@ export function createReminderTask(allowed: ReadonlySet<number>) {
 		phases: {
 			wait: async (task, runtime, context) => {
 				const due = task.state.checkpoint.due;
-				await sleepUnlessChanged(runtime, task.input.id, due, context);
+				const doc = await runtime.snapshot(Reminders, runtime.conversationId, context);
+				if (doc?.items[task.input.id]?.next === due && runtime.now() < due) {
+					await runtime.sleepUntil(due, task.state.checkpoint, context);
+					return;
+				}
 				await runtime.commit((tx) => fire(tx, runtime, allowed, task.input.id, due), context);
 			},
 		},
@@ -110,3 +104,20 @@ export function createReminderTask(allowed: ReadonlySet<number>) {
 }
 
 export type ReminderTask = ReturnType<typeof createReminderTask>;
+
+/** Stop matching core tasks through the host; plugins receive only this reminder-scoped capability. */
+export async function cancelReminderTask(
+	harness: Harness,
+	conversationId: ConversationId,
+	id: string,
+	context: Context,
+): Promise<void> {
+	const tasks = (await harness.inspect(context)).tasks;
+	for (const task of tasks) {
+		if (task.record.kind !== REMIND_TASK || task.record.conversationId !== conversationId) continue;
+		const input = task.record.input as Input;
+		if (input.id !== id) continue;
+		await harness.abortTask(task.record.id, context);
+		await harness.waitForTask(task.record.id, context);
+	}
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9 (2026-11-03)
+
+- Upgrade all Earendil packages to exactly 1.5.0, including the new pi-schema tool builders.
+- Adapt document checkpoints, live watches and failure reports to the new durable API.
+- Persist Telegram retry backoffs and reminder waits as durable sleeps; cancelling a reminder ends its sleeping task immediately.
+- SQLite storage upgrades automatically to schema v2. Before deployment, stop the service and back up the data directory; rolling back to pi 1.3.0 or earlier requires restoring that backup.
+
 ## 0.1.8 (2026-10-24)
 
 - Replies carry the original message text or media caption as context; selected Telegram quotes take priority.

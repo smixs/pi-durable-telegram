@@ -46,6 +46,7 @@ export async function sendPhase(task: Task, runtime: Runtime, context: Context, 
 	let chunks = await renderOutcome(job, state);
 	while (state.sent < chunks.length) {
 		const next = await deliverChunk(job, state.sent, chunks[state.sent] as Chunk, state);
+		if (next === undefined) return;
 		if (next.htmlFrom !== state.htmlFrom) chunks = await renderOutcome(job, next);
 		state = next;
 	}
@@ -88,11 +89,13 @@ type Sent =
 	| { kind: "rejected" };
 type Edited = Sent | { kind: "unavailable" };
 
-async function deliverChunk(job: Job, index: number, chunk: Chunk, state: SendState): Promise<SendState> {
+async function deliverChunk(job: Job, index: number, chunk: Chunk, state: SendState): Promise<SendState | undefined> {
 	const preview = state.preview;
-	if (index === 0 && preview !== undefined) {
-		const edited = await editWithRetries(job, preview.messageId, chunk);
-		if (edited !== undefined) return record(job, state, index, edited, chunk);
+	if (index === 0 && preview !== undefined && state.previewSkipped !== true) {
+		const edited = await editWithRetries(job, preview.messageId, chunk, state);
+		if (edited === undefined) return undefined;
+		if (edited.kind !== "gone") return record(job, state, index, edited, chunk);
+		state = { ...state, previewSkipped: true, rateLimitWaits: 0 };
 	}
 	if (state.inFlight === index && index > 0) {
 		job.deps.log.warn("delivery_unknown", { chat: job.task.input.chatId, chunk: index, reason: "restart during send" });
@@ -100,13 +103,43 @@ async function deliverChunk(job: Job, index: number, chunk: Chunk, state: SendSt
 	}
 	const marked: SendState = { ...state, inFlight: index };
 	await save(job, marked);
-	const sent = await withRateLimit(job, () => sendNew(job, chunk, index === 0));
-	return record(job, marked, index, sent, chunk);
+	const attempt = await attemptOnce(
+		job,
+		() => sendNew(job, chunk, index === 0),
+		(state.rateLimitWaits ?? 0) < MAX_RATE_LIMIT_WAITS,
+	);
+	// A confirmed 429 sent nothing: clear the uncertain-send marker before sleeping.
+	if (attempt.retryAfterMs !== undefined) return sleepBeforeRetry(job, state, attempt.retryAfterMs, true);
+	return record(job, marked, index, attempt.sent, chunk);
+}
+
+/** Idempotent edits may retry after an outage; counters are carried by the sleeping checkpoint. */
+async function editWithRetries(job: Job, messageId: number, chunk: Chunk, state: SendState): Promise<Sent | undefined> {
+	const attempt = await attemptOnce(
+		job,
+		() => editPreview(job, messageId, chunk),
+		(state.rateLimitWaits ?? 0) < MAX_RATE_LIMIT_WAITS,
+	);
+	if (attempt.retryAfterMs !== undefined) return sleepBeforeRetry(job, state, attempt.retryAfterMs, true);
+	if (attempt.sent.kind !== "unavailable") return attempt.sent;
+	const attempts = state.editAttempts ?? 0;
+	const delay = (job.deps.editRetryDelaysMs ?? EDIT_RETRY_DELAYS_MS)[attempts];
+	if (delay !== undefined)
+		return sleepBeforeRetry(job, { ...state, editAttempts: attempts + 1, rateLimitWaits: 0 }, delay);
+	job.deps.log.warn("preview_edit_gave_up", { chat: job.task.input.chatId, attempts: attempts + 1 });
+	return { kind: "gone" };
+}
+
+async function sleepBeforeRetry(job: Job, state: SendState, delay: number, rateLimited = false): Promise<undefined> {
+	const { inFlight: _cleared, ...rest } = state;
+	const checkpoint = rateLimited ? { ...rest, rateLimitWaits: (state.rateLimitWaits ?? 0) + 1 } : rest;
+	await job.runtime.sleepUntil(job.runtime.now() + delay, checkpoint, job.context);
+	return undefined;
 }
 
 /** Commit the chunk's outcome; a sent rich chunk with callback buttons keeps its Markdown in the same commit. */
 async function record(job: Job, state: SendState, index: number, sent: Sent, chunk?: Chunk): Promise<SendState> {
-	const { inFlight: _cleared, ...rest } = state;
+	const { inFlight: _cleared, editAttempts: _edits, rateLimitWaits: _waits, previewSkipped: _skipped, ...rest } = state;
 	// A refused rich message sent nothing: the same chunk index is delivered again as HTML.
 	const next: SendState = sent.kind === "rejected" ? { ...rest, htmlFrom: index } : { ...rest, sent: index + 1 };
 	if (sent.kind === "sent") next.messageIds = [...state.messageIds, sent.messageId];
@@ -125,25 +158,6 @@ async function save(job: Job, state: SendState, write?: (tx: Tx) => Promise<void
 		await write?.(tx);
 		return { status: "running", checkpoint: state };
 	}, job.context);
-}
-
-/**
- * The edit is idempotent, so an outage (network, 5xx) is waited out with backoff instead of being recorded as done.
- * `undefined`: the preview cannot carry the answer (deleted, or Telegram stayed down); a new message is sent.
- */
-async function editWithRetries(job: Job, messageId: number, chunk: Chunk): Promise<Sent | undefined> {
-	const delays = job.deps.editRetryDelaysMs ?? EDIT_RETRY_DELAYS_MS;
-	for (let attempt = 0; ; attempt++) {
-		const edited = await withRateLimit(job, () => editPreview(job, messageId, chunk));
-		if (edited.kind === "gone") return undefined;
-		if (edited.kind !== "unavailable") return edited;
-		const delay = delays[attempt];
-		if (delay === undefined) {
-			job.deps.log.warn("preview_edit_gave_up", { chat: job.task.input.chatId, attempts: attempt + 1 });
-			return undefined;
-		}
-		await job.runtime.sleep(job.runtime.now() + delay, job.context);
-	}
 }
 
 async function editPreview(job: Job, messageId: number, chunk: Chunk): Promise<Edited> {
@@ -193,15 +207,6 @@ async function sendNew(job: Job, chunk: Chunk, first: boolean): Promise<Sent> {
 		() => port.sendMessage(chatId, chunk.plain, replyTo, signal),
 	);
 	return { kind: "sent", messageId: id };
-}
-
-/** Retry a Telegram call after 429 (nothing was sent); classify every other failure. Aborts propagate. */
-async function withRateLimit<T extends Edited>(job: Job, call: () => Promise<T>): Promise<T | Sent> {
-	for (let waits = 0; ; waits++) {
-		const attempt = await attemptOnce(job, call, waits < MAX_RATE_LIMIT_WAITS);
-		if (attempt.retryAfterMs === undefined) return attempt.sent;
-		await job.runtime.sleep(job.runtime.now() + attempt.retryAfterMs, job.context);
-	}
 }
 
 type Attempt<T> = { sent: T | Sent; retryAfterMs?: undefined } | { retryAfterMs: number };

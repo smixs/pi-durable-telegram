@@ -23,7 +23,7 @@
 Built on [pi](https://pi.dev), an open-source coding agent, and its new durable engine
 [pi-durable](https://earendil.com/posts/pi-durable/).
 
-**How it differs from plain pi.** When plain pi dies, you restart it, find the session and say "continue". pi-durable records every step before it takes it. That makes it fit for always-on agents that survive crashes and reboots and always finish what they started.
+**How it differs from plain pi.** When plain pi dies, you restart it, find the session and say "continue". pi-durable stores the conversation, queue and task checkpoints. After a crash or reboot it resumes durable work under a bounded retry policy.
 
 ## Install
 
@@ -88,9 +88,10 @@ no domain and no web server.
 
 <img src="assets/durable.webp" alt="A server drawn as a closed book with a bookmark ribbon, its plug pulled out: it remembers where it stopped" width="100%">
 
-**It does not lose its place.** Every step the agent takes is saved before you see it. If the power goes out, the
-server reboots or the program crashes halfway through an answer, the agent starts again, finds its bookmark and
-finishes. You get one answer, not zero and not two. Messages you send while it is busy wait in line.
+**It keeps its place.** The conversation, incoming queue and delivery checkpoints are saved. After a crash, the
+agent resumes durable work and retries interrupted model requests within its retry limit. Live text may trail
+storage by up to one second. Messages you send while it is busy wait in line. Delivery boundaries are described
+in [how it works](docs/how-it-works.md#what-durable-means-here).
 
 </details>
 
@@ -199,7 +200,7 @@ Linux with Node.js 22.19 or newer.
 | | pi-durable telegram | A Telegram bridge into an open pi session | pi in tmux over SSH |
 |---|---|---|---|
 | Where the agent runs | As a service on the server, always on | Inside a pi session that must stay open | In a terminal you keep alive |
-| A crash or restart mid-answer | The run resumes and the answer arrives once | Nothing resumes it | Nothing resumes it |
+| A crash or restart mid-answer | Durable work resumes with bounded model retries | Nothing resumes it | Nothing resumes it |
 | Messages while it is busy | Queued durably, answered in order | Depends on the session | Typed by hand |
 | Reaching it from a phone | Telegram | Telegram | An SSH client |
 | Setup | One command | An extension inside pi | Manual |

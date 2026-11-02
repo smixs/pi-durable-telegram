@@ -32,6 +32,10 @@ export type SendState = {
 	/** Index of a non-idempotent send started but not recorded: after a crash chunk 0 is sent again, others skipped. */
 	inFlight?: number;
 	messageIds: number[];
+	/** Retry counters survive durable sleeps and process restarts. */
+	editAttempts?: number;
+	rateLimitWaits?: number;
+	previewSkipped?: boolean;
 	/** Some chunk's outcome is unknown. */
 	unknown?: boolean;
 	/** Telegram rejected the rich message at this chunk: the rest of the answer goes out as HTML. */

@@ -97,7 +97,7 @@ test("T-mcp: tools of a stdio server are exposed and callable; a failing server 
 			await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "use mcp"));
 			await waitFor(() => port.textsIn(CHAT).includes("done"));
 			assert.equal(results[0], "echo: hi");
-			assert.match(results[1] ?? "", /text: must not have fewer than 1 characters/, "the $ref schema is enforced");
+			assert.match(results[1] ?? "", /text: expected at least 1 characters/, "the $ref schema is enforced");
 			assert.match(results[2] ?? "", /SECRET=tok-1$/);
 			assert.doesNotMatch(results[2] ?? "", /TELEGRAM_BOT_TOKEN|MY_TOKEN/);
 			assert.ok(alive(pid));

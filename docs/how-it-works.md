@@ -56,17 +56,18 @@ edited about once per second) and is then sent as a rich message.
 
 ## What "durable" means here
 
-pi-durable writes every model turn, tool call and piece of state to storage before anything is shown. This package
-adds the Telegram side of the same promise:
+pi-durable stores completed model turns, tool calls and durable task checkpoints. Live partial text is shown immediately
+and persisted within the upstream default of one second; a crash may lose that final second of partial progress. This
+package adds durable Telegram intake and delivery:
 
 | Event | What happens |
 |---|---|
-| The process is killed while the model is answering | On start, `resume()` continues the run; the answer reaches the chat once |
+| The process is killed while the model is answering | On start, `resume()` retries the interrupted request under the retry policy; exhausted retries report an unanswered request |
 | Killed while a shell command runs | The model is told the tool was interrupted and decides what to do next |
 | Killed after the answer is stored but before Telegram got it | Delivery resumes from its stored progress; a first message cut off mid-send is sent again (rarely twice), later parts never twice |
 | Telegram redelivers an update | The message (chat, message id and send date) is already known; it is not submitted twice |
 | The bot token changes and message ids start again | The send date tells a new message from an old one with the same id; nothing is dropped |
-| Killed while the answer streams as a draft | The draft disappears; the run resumes and the final answer is sent once |
+| Killed while the answer streams as a draft | The draft disappears; the interrupted request follows the retry policy and delivery resumes from its checkpoint |
 | You write while the agent is busy | The message is queued durably and answered after the current run |
 | Telegram is unreachable for a while | Edits and sends retry with backoff, honouring `retry_after` |
 
