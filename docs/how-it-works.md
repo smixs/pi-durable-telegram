@@ -35,7 +35,7 @@ edited about once per second) and is then sent as a rich message.
   ✅ and the other choices of its `<tg-button-row>` are disabled; other rows of the message stay answerable (a button
   outside any row disables all of the message's choices). There is no waiting state: typing instead of tapping is just a
   message, and buttons keep working after a restart (old ones may just stay unmarked).
-- **Queueing.** Messages sent while the agent works are queued and answered in order. Nothing is dropped.
+- **Steering.** Messages sent while the agent works are stored durably and join the current run at its next boundary, including tool rounds. Inputs that share an answer produce one Telegram reply.
 - **Commands.** `/new`, `/stop`, `/compact`, `/status`, `/help`. `/new` drops what was still waiting for an answer
   and says so: its reply names the stopped run and the first words of each dropped message.
 - **Anything you send reaches the agent.** Photos, documents, videos, animations and stickers (up to 20 MB, the Bot
@@ -68,7 +68,7 @@ package adds durable Telegram intake and delivery:
 | Telegram redelivers an update | The message (chat, message id and send date) is already known; it is not submitted twice |
 | The bot token changes and message ids start again | The send date tells a new message from an old one with the same id; nothing is dropped |
 | Killed while the answer streams as a draft | The draft disappears; the interrupted request follows the retry policy and delivery resumes from its checkpoint |
-| You write while the agent is busy | The message is queued durably and answered after the current run |
+| You write while the agent is busy | The message is stored durably and steers the current run at its next boundary |
 | Telegram is unreachable for a while | Edits and sends retry with backoff, honouring `retry_after` |
 
 ## How it compares

@@ -10,7 +10,7 @@ import { TelegramApiError, TelegramUnavailable, TelegramUnknown } from "../../sr
 import { CHAT, newFaux, startTestAgent, type TestAgent, tempDir } from "../helpers/agent.ts";
 import { waitFor } from "../helpers/env.ts";
 import { FakeTelegram } from "../helpers/fake-telegram.ts";
-import { gate, gated, lastToolResult, textOf, toolCall, words } from "../helpers/faux-steps.ts";
+import { gate, gated, lastToolResult, lastUserText, textOf, toolCall, words } from "../helpers/faux-steps.ts";
 import { textUpdate } from "../helpers/updates.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -220,6 +220,33 @@ test("T-busy-queue: a message during a run is queued and answered after it, in o
 		],
 	);
 	assert.equal(markdownToTelegramHtml("answer one"), "answer one");
+});
+
+test("INF-18: a busy message steers the current run at its next tool boundary", async () => {
+	const faux = newFaux();
+	const release = gate();
+	let seen = "";
+	faux.setResponses([
+		async () => {
+			await release.promise;
+			return toolCall("bash", { command: "echo ready" });
+		},
+		(context) => {
+			seen = lastUserText(context.messages);
+			return fauxAssistantMessage("corrected answer");
+		},
+	]);
+	const { t, port } = await setup(faux);
+	await t.agent.channel.handleUpdate(textUpdate(CHAT, 40, "start"));
+	await waitFor(() => faux.state.callCount === 1);
+	await t.agent.channel.handleUpdate(textUpdate(CHAT, 41, "use the corrected plan"));
+	const id = (await conversationId(t)) as never;
+	await waitFor(async () => ((await t.agent.harness.snapshot(InboxDoc, id, BG))?.items.length ?? 0) === 1);
+	release.open();
+	await waitFor(() => port.textsIn(CHAT).includes("corrected answer"));
+	assert.equal(seen, "use the corrected plan");
+	assert.equal(faux.state.callCount, 2, "the correction joins the existing tool round");
+	assert.deepEqual(port.textsIn(CHAT), ["corrected answer"], "the shared answer is delivered once");
 });
 
 test("T-edit-unavailable: a final preview edit that hits a Telegram outage is retried, the answer arrives", async () => {

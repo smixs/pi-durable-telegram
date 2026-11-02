@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10 (2026-11-03)
+
+- Messages received while busy steer the current run at its next boundary, including tool rounds.
+- Provider rate limits retry five times with 5/10/20/40/60 second backoffs.
+- A stale draft stop button is silent while idle and logs `draft_stop_idle_ignored`.
+- Install a version- and checksum-pinned pi-durable 1.5.0 patch automatically: OAuth rotation failures retry up to three times at 10/20/40 seconds. The external credential owner still performs refresh; the gateway waits and reads credentials again on the next request.
+
 ## 0.1.9 (2026-11-03)
 
 - Upgrade all Earendil packages to exactly 1.5.0, including the new pi-schema tool builders.

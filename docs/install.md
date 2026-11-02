@@ -24,6 +24,13 @@ bash install.sh
 Running it again updates the daemon and keeps your bot and settings. For unattended runs it reads `PDT_YES=1`,
 `PDT_BOT_TOKEN`, `PDT_USER_ID`, `PDT_DEEPGRAM_API_KEY` and `PDT_WORKDIR`.
 
+Since 0.1.10, npm's `postinstall` runs `scripts/patch-pi-durable.mjs` to apply the bundled OAuth retry patch to
+pi-durable 1.5.0. Keep lifecycle scripts enabled when installing the release asset. The script accepts the exact
+upstream or already-patched checksum; an unexpected version or modified file fails installation with an `INF-18`
+error. Re-running `npm rebuild pi-durable-telegram` applies or verifies the same patch. This adds three durable
+retries at 10/20/40 seconds for rotation-related authentication errors. Your external credential owner supplies the
+new access token; each retried request reads credentials again. See [the retry model](formal/README.md).
+
 ## Manual install
 
 Without the installer, step by step. You need a Linux server with systemd and Node.js 22.19 or newer, a bot token from

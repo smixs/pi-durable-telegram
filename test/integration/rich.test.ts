@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { type FauxProviderHandle, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { splitForTelegram } from "../../src/format/chunk.ts";
 import { stripButtons, THINKING } from "../../src/format/rich.ts";
@@ -332,6 +333,14 @@ for (const scenario of [
 		else assert.equal(seen, scenario.expected);
 	});
 }
+
+test("INF-18: an idle draft stop is silent and logged, including before the first run", async () => {
+	const { t, port } = await setup(newFaux());
+	await t.agent.channel.handleUpdate(stoppedUpdate(CHAT, 123));
+	assert.deepEqual(port.textsIn(CHAT), []);
+	assert.ok(t.logs.some((line) => line.includes("draft_stop_idle_ignored")));
+	assert.equal((await t.agent.harness.inspect(BG)).tasks.length, 0);
+});
 
 test("T-draft-stop: the draft's stop button stops the run like /stop; a redelivered or foreign stop does nothing", async () => {
 	const faux = newFaux();

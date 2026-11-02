@@ -17,6 +17,8 @@ export function createSettings(options: { contextCap?: number; contextWindow?: n
 	const capped = contextCap !== undefined && contextWindow !== undefined && contextCap < contextWindow;
 	return {
 		progress: { partialIntervalMs: PARTIAL_INTERVAL_MS, outputIntervalMs: 500 },
+		// Per-minute provider limits need a longer window: 5/10/20/40/60 seconds.
+		retry: { enabled: true, maxRetries: 5, baseDelayMs: 5000, maxAgentDelayMs: 60000 },
 		...(capped ? { compaction: cappedCompaction(contextCap, contextWindow) } : {}),
 	};
 }

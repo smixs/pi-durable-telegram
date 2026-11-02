@@ -38,7 +38,7 @@ export async function waitPhase(
 		return;
 	}
 	const submission = await conversation.submit(
-		{ type: "input", content: task.input.content as UserInput, requestId: task.input.requestId, whenBusy: "followUp" },
+		{ type: "input", content: task.input.content as UserInput, requestId: task.input.requestId, whenBusy: "steer" },
 		context,
 	);
 	if (task.state.checkpoint.submissionId === undefined) {

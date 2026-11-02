@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { retryDelayMs } from "@earendil-works/pi-ai/utils/retry";
 import fc from "fast-check";
 import { createSettings } from "../../src/agent/settings.ts";
 import { check } from "../helpers/property.ts";
 
 // pi-durable's defaults, merged under ours (harness/agent.js DEFAULT_COMPACTION_POLICY).
 const DEFAULTS = { reserveTokens: 16384, keepRecentTokens: 20000, backgroundTokens: 32768 };
+
+test("INF-18: per-minute provider limits get five retries over 135 seconds", () => {
+	const policy = createSettings().retry;
+	assert.deepEqual(policy, { enabled: true, maxRetries: 5, baseDelayMs: 5000, maxAgentDelayMs: 60000 });
+	assert.deepEqual(
+		[1, 2, 3, 4, 5].map((attempt) => retryDelayMs(policy as never, attempt)),
+		[5000, 10000, 20000, 40000, 60000],
+	);
+});
 
 test("PI_CONTEXT_CAP: compaction never starts far below the cap, and a compacted context does not re-trigger it", (t) => {
 	const capAndWindow = fc

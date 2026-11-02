@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
+import { LiveDoc } from "@earendil-works/pi-durable";
 import type { Message, Update } from "grammy/types";
 import { probeImage } from "../agent/tools/image-probe.ts";
 import { truncate } from "../format/escape.ts";
@@ -123,9 +124,14 @@ async function runCommand(scope: MessageScope, name: string, args: string): Prom
 	}
 }
 
-/** The stop button of a draft does what /stop does; the update id keeps a redelivered stop from running twice. */
+/** Ignore a stale draft's stop while idle; otherwise run /stop, idempotent by update id. */
 async function stopFromDraft(rt: ChannelRuntime, chatId: number, updateId: number): Promise<void> {
 	const conversation = await rt.directory.get(chatId, BG);
+	const liveRun = (await rt.harness.snapshot(LiveDoc, conversation.id, BG))?.run;
+	if (liveRun === undefined) {
+		rt.log.info("draft_stop_idle_ignored", { chat: chatId, updateId });
+		return;
+	}
 	const scope = { rt, conversation, chatId, updateId, key: `tg:${chatId}:stop:${updateId}` };
 	detach(scope, "stop", () => runStop(scope));
 }
