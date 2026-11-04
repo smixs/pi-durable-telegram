@@ -176,7 +176,8 @@ export function parseAllowedUserIds(value: string | undefined, out: Collector = 
 
 function parseProvider(value: string | undefined, out: Collector): string {
 	const provider = nonEmpty(value) ?? DEFAULT_PROVIDER;
-	if (!/^[a-z0-9][a-z0-9-]*$/.test(provider)) out.add("PI_PROVIDER", "must look like a provider id, e.g. anthropic");
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(provider))
+		out.add("PI_PROVIDER", "must look like a provider id, e.g. anthropic");
 	return provider;
 }
 

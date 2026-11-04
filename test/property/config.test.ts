@@ -82,6 +82,10 @@ test("config examples", () => {
 	assert.deepEqual(problemsOf({ ...base, TELEGRAM_BOT_TOKEN: "nope" }), ["TELEGRAM_BOT_TOKEN"]);
 	assert.deepEqual(problemsOf({ ...base, PI_THINKING: "huge" }), ["PI_THINKING"]);
 	assert.deepEqual(problemsOf({ ...base, PI_PROVIDER: "Bad Id" }), ["PI_PROVIDER"]);
+	assert.equal(
+		parseConfig({ ...base, PI_PROVIDER: "custom.provider-v1_alpha" }, defaults).provider,
+		"custom.provider-v1_alpha",
+	);
 	assert.deepEqual(problemsOf({ ...base, PI_CONTEXT_CAP: "10" }), ["PI_CONTEXT_CAP"]);
 	assert.deepEqual(problemsOf({ ...base, TELEGRAM_API_ROOT: "ftp://x" }), ["TELEGRAM_API_ROOT"]);
 	const custom = parseConfig(
