@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import {
 	type FauxProviderHandle,
@@ -9,9 +10,10 @@ import {
 	type Message,
 } from "@earendil-works/pi-ai";
 import type { Harness } from "@earendil-works/pi-durable";
+import { ChatMap } from "../../src/channel/docs.ts";
 import { toolHint } from "../../src/delivery/hints.ts";
 import { CHAT, newFaux, startTestAgent, type TestAgent, tempDir } from "../helpers/agent.ts";
-import { sleep, waitFor } from "../helpers/env.ts";
+import { waitFor } from "../helpers/env.ts";
 import { FakeTelegram } from "../helpers/fake-telegram.ts";
 import { gate, lastUserText, textOf, untilAborted } from "../helpers/faux-steps.ts";
 import { stoppedUpdate, textUpdate } from "../helpers/updates.ts";
@@ -43,7 +45,7 @@ type Seen = { role: "parent" | "child"; model: string; tools: string[]; user: st
  * request offers `helper` (the parent) or not (a helper).
  */
 function router(options: {
-	parent: (messages: readonly Message[]) => ReturnType<typeof fauxAssistantMessage>;
+	parent: (messages: readonly Message[], signal: AbortSignal | undefined) => ReturnType<FauxResponseFactory>;
 	child: FauxResponseFactory;
 	seen: Seen[];
 }): FauxResponseFactory {
@@ -51,7 +53,9 @@ function router(options: {
 		const tools = toolNames(context.messages);
 		const role = tools.includes("helper") ? "parent" : "child";
 		options.seen.push({ role, model: model.id, tools, user: lastUserText(context.messages) });
-		return role === "parent" ? options.parent(context.messages) : options.child(context, streamOptions, state, model);
+		return role === "parent"
+			? options.parent(context.messages, streamOptions?.signal)
+			: options.child(context, streamOptions, state, model);
 	};
 }
 
@@ -61,10 +65,12 @@ const helperCalls = (...tasks: string[]) =>
 		{ stopReason: "toolUse" },
 	);
 
-/** Parent: delegate `tasks` on the first request, then report what came back. */
+/** Parent: delegate on the first request, then echo acknowledgements and report inputs. */
 const delegate =
 	(...tasks: string[]) =>
 	(messages: readonly Message[]) => {
+		const user = lastUserText(messages);
+		if (user.startsWith("[helper ")) return fauxAssistantMessage(`Parent received: ${user}`);
 		const done = results(messages);
 		if (done.length === 0) return helperCalls(...tasks);
 		return fauxAssistantMessage(`Parent got: ${done.map((r) => `${r.isError ? "ERR " : ""}${textOf(r)}`).join(" | ")}`);
@@ -95,7 +101,69 @@ async function children(harness: Harness): Promise<number[]> {
 
 const many = (step: FauxResponseFactory, n = 30) => Array.from({ length: n }, () => step);
 
-test("T-helper-answer: the helper's final answer is the tool result; it has the full toolset but no helper tool", async () => {
+test("T-helper-background-60s: returns within 2 seconds and wakes conversation 3 after 60 seconds", {
+	timeout: 75_000,
+}, async (test) => {
+	const faux = newFaux();
+	const seen: Seen[] = [];
+	let acknowledgement: string | undefined;
+	let finished = false;
+	faux.setResponses(
+		many(
+			router({
+				seen,
+				parent: (messages) => {
+					const user = lastUserText(messages);
+					if (user.startsWith("[helper ")) return fauxAssistantMessage("Report received");
+					const result = results(messages).at(-1);
+					if (result === undefined) return helperCalls("Work for 60 seconds");
+					acknowledgement = textOf(result);
+					return fauxAssistantMessage("Continuing while helper works");
+				},
+				child: async (_context, options) => {
+					try {
+						await delay(60_000, undefined, { signal: options?.signal });
+					} catch (error) {
+						if (!options?.signal?.aborted) throw error;
+						return fauxAssistantMessage("", { stopReason: "aborted" });
+					}
+					finished = true;
+					return fauxAssistantMessage("60-second result");
+				},
+			}),
+		),
+	);
+	const { t, port } = await setup(faux);
+	cleanups.push(() => t.close());
+	const harness = t.agent.harness;
+	const started = performance.now();
+	await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
+	assert.equal((await harness.snapshot(ChatMap, BG))?.chats[String(CHAT)], 3);
+	const ack = await waitFor(() => acknowledgement, { timeoutMs: 2_000, what: "helper acknowledgement" });
+	const elapsed = performance.now() - started;
+	assert.ok(elapsed < 2_000, `acknowledgement took ${elapsed.toFixed(1)} ms`);
+	assert.match(ack, /^Helper (h\d+) started in the background/);
+	assert.equal(finished, false, "the helper is still working");
+	await waitFor(() => port.textsIn(CHAT).includes("Continuing while helper works"));
+	assert.equal(finished, false, "the parent turn already answered");
+	await waitFor(() => port.textsIn(CHAT).includes("Report received"), { timeoutMs: 65_000 });
+	assert.equal(finished, true);
+	const match = ack.match(/h\d+/);
+	assert.ok(match);
+	const report = await harness.commit(async (tx) => {
+		const conversation = (await tx.scanConversations({}, 10)).items.find((item) => item.id === 3);
+		assert.ok(conversation);
+		return tx.submissionByRequest(conversation.id, `helper-report:${match[0]}`);
+	}, BG);
+	assert.equal(report?.type, "input");
+	assert.equal(report?.status, "done");
+	assert.ok(seen.some((s) => s.role === "parent" && s.user === `[helper ${match[0]} done] 60-second result`));
+	test.diagnostic(
+		`acknowledged in ${elapsed.toFixed(1)} ms; report reached conversation 3 after ${(performance.now() - started).toFixed(0)} ms`,
+	);
+});
+
+test("T-helper-answer: the helper reports in a new input and has the full toolset except helper", async () => {
 	const faux = newFaux({ models: [{ id: "faux-1" }, { id: "faux-2" }] });
 	const seen: Seen[] = [];
 	faux.setResponses(
@@ -110,8 +178,8 @@ test("T-helper-answer: the helper's final answer is the tool result; it has the 
 	const { t, port } = await setup(faux);
 	cleanups.push(() => t.close());
 	await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
-	await waitFor(() => port.textsIn(CHAT).some((text) => text.startsWith("Parent got")), { what: "answer" });
-	assert.deepEqual(port.textsIn(CHAT), ['Parent got: 2, 3, 5 for "Name three primes"']);
+	const answer = await waitFor(() => port.textsIn(CHAT).find((text) => text.startsWith("Parent received")));
+	assert.match(answer, /^Parent received: \[helper h\d+ done\] 2, 3, 5 for "Name three primes"$/);
 	const child = seen.filter((s) => s.role === "child");
 	assert.equal(child.length, 1);
 	assert.ok(child[0]?.tools.includes("bash") && child[0].tools.includes("telegram_send_file"), "full toolset");
@@ -135,7 +203,9 @@ test("T-helper-model: PI_HELPER_MODEL runs helpers on another model; a bad value
 		const { t, port } = await setup(faux, { env: { PI_HELPER_MODEL: value } });
 		cleanups.push(() => t.close());
 		await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
-		await waitFor(() => port.textsIn(CHAT).includes("Parent got: hi from helper"), { what: `answer ${value}` });
+		await waitFor(() => port.textsIn(CHAT).some((text) => /\[helper h\d+ done\] hi from helper$/.test(text)), {
+			what: `answer ${value}`,
+		});
 		assert.equal(seen.find((s) => s.role === "parent")?.model, "faux-1");
 		assert.equal(seen.find((s) => s.role === "child")?.model, expected, value);
 		const reasons = t.agent.plugins.report.problems.map((p) => p.reason).join("\n");
@@ -165,16 +235,30 @@ test("T-helper-limit: calls beyond PI_HELPERS_MAX get an error telling the model
 	cleanups.push(() => t.close());
 	await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
 	await waitFor(() => seen.filter((s) => s.role === "child").length === 2, { what: "two helpers running" });
-	await sleep(200);
-	release.open();
 	const answer = await waitFor(() => port.textsIn(CHAT).find((text) => text.startsWith("Parent got")));
 	const parts = answer.replace("Parent got: ", "").split(" | ");
-	assert.equal(parts.filter((p) => p.startsWith("done t")).length, 2, answer);
+	const ids = parts.flatMap((part) => part.match(/^Helper (h\d+) started/)?.[1] ?? []);
+	assert.equal(new Set(ids).size, 2, answer);
 	const refused = parts.filter((p) => p.startsWith("ERR "));
 	assert.equal(refused.length, 3, answer);
 	for (const part of refused) assert.match(part, /2 helpers are already running; wait for their answers/);
 	assert.equal(seen.filter((s) => s.role === "child").length, 2, "only two helpers started");
 	assert.equal((await children(t.agent.harness)).length, 2);
+	release.open();
+	await waitFor(
+		async () => {
+			const harness = t.agent.harness;
+			const { items } = await harness.commit((tx) => tx.scanConversations({}, 10), BG);
+			const parent = items.find((record) => record.owner === undefined);
+			assert.ok(parent);
+			const reports = await harness.commit(
+				async (tx) => Promise.all(ids.map((id) => tx.submissionByRequest(parent.id, `helper-report:${id}`))),
+				BG,
+			);
+			return reports.every((report) => report?.type === "input" && report.status === "done");
+		},
+		{ what: "an input for each helper" },
+	);
 });
 
 async function childTaskStates(harness: Harness): Promise<string[]> {
@@ -186,31 +270,58 @@ async function childTaskStates(harness: Harness): Promise<string[]> {
 }
 
 for (const how of ["/stop", "draft stop button"] as const) {
-	test(`T-helper-stop: ${how} aborts the running helpers with their parent`, async () => {
+	test(`T-helper-stop: ${how} stops the parent turn and the helpers still report`, async () => {
 		const faux = newFaux();
 		const seen: Seen[] = [];
-		let aborted = 0;
-		const child: FauxResponseFactory = async (context, options, state, model) => {
-			const message = await untilAborted(context, options, state, model);
-			aborted += 1;
-			return message;
-		};
-		faux.setResponses(many(router({ seen, parent: delegate("long a", "long b"), child })));
+		const release = gate();
+		let parentWaiting = false;
+		let parentAborted = false;
+		const reports = new Set<string>();
+		faux.setResponses(
+			many(
+				router({
+					seen,
+					parent: async (messages, signal) => {
+						for (const message of messages) {
+							if (message.role === "user" && textOf(message).startsWith("[helper ")) reports.add(textOf(message));
+						}
+						if (reports.size > 0) return fauxAssistantMessage("Reports received");
+						if (results(messages).length === 0) return helperCalls("long a", "long b");
+						parentWaiting = true;
+						await delay(30_000, undefined, { signal }).catch((error: unknown) => {
+							if (!signal?.aborted) throw error;
+							parentAborted = true;
+						});
+						return fauxAssistantMessage("", { stopReason: "aborted" });
+					},
+					child: async (context, options, state, model) => {
+						const answer = await Promise.race([release.promise, untilAborted(context, options, state, model)]);
+						return answer ?? fauxAssistantMessage(`done ${lastUserText(context.messages)}`);
+					},
+				}),
+			),
+		);
 		const rich = how === "draft stop button";
 		const { t, port } = await setup(faux, { config: { TELEGRAM_RICH: rich ? "auto" : "never" } });
 		cleanups.push(() => t.close());
 		await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
+		await waitFor(() => parentWaiting, { what: "parent running after acknowledgements" });
 		await waitFor(() => seen.filter((s) => s.role === "child").length === 2, { what: "helpers running" });
 		if (rich) {
 			const draft = await waitFor(() => port.drafts[0], { what: "draft" });
 			await t.agent.channel.handleUpdate(stoppedUpdate(CHAT, draft.draftId));
 		} else await t.agent.channel.handleUpdate(textUpdate(CHAT, 2, "/stop"));
 		await waitFor(() => port.textsIn(CHAT).includes("Stopped."), { what: "stopped" });
-		await waitFor(() => aborted === 2, { what: "both helper requests aborted" });
+		assert.equal(parentAborted, true);
+		assert.equal(reports.size, 0, "both helpers are still working");
+		release.open();
+		await waitFor(() => reports.size === 2, { what: "both reports after stop" });
 		await t.agent.harness.waitForIdle(BG);
 		const states = await childTaskStates(t.agent.harness);
-		assert.ok(states.length >= 2 && states.every((s) => s === "aborted"), states.join(","));
-		assert.ok(!port.textsIn(CHAT).some((text) => text.startsWith("Parent got")));
+		assert.ok(states.length >= 2 && states.every((s) => s === "completed"), states.join(","));
+		for (const task of ["long a", "long b"]) {
+			assert.ok([...reports].some((report) => report.endsWith(` done] done ${task}`)));
+		}
 	});
 }
 
@@ -244,7 +355,9 @@ test("T-helper-restart: a restart mid-helper resumes the same child without a se
 	);
 	const two = await setup(second, { dir });
 	cleanups.push(() => two.t.close());
-	await waitFor(() => two.port.textsIn(CHAT).includes("Parent got: resumed answer"), { what: "answer after restart" });
+	await waitFor(() => two.port.textsIn(CHAT).some((text) => /\[helper h\d+ done\] resumed answer$/.test(text)), {
+		what: "answer after restart",
+	});
 	const harness = two.t.agent.harness;
 	const ids = await children(harness);
 	assert.equal(ids.length, 1, "the same child, not a second one");
@@ -278,15 +391,15 @@ test("T-helper-plugin-off: a helper left running, then the plugin removed: the d
 	second.setResponses(
 		many((context) => {
 			if (lastUserText(context.messages) === "left running") return fauxAssistantMessage("late child answer");
-			const result = results(context.messages).at(-1);
-			seen = `${result?.isError}:${textOf(result)}`;
+			seen = lastUserText(context.messages);
 			return fauxAssistantMessage("recovered");
 		}),
 	);
 	const two = await setup(second, { dir, config: { PI_PLUGINS: "" } });
 	cleanups.push(() => two.t.close());
-	await waitFor(() => two.port.textsIn(CHAT).includes("recovered"), { what: "answer after restart" });
-	assert.match(seen, /^true:[\s\S]*Tool helper was interrupted/);
+	await waitFor(() => /^\[helper h\d+ interrupted\] The helper was disabled\.$/.test(seen), {
+		what: "interruption report after restart",
+	});
 	await two.t.agent.harness.waitForIdle(BG);
 	const live = (await two.t.agent.harness.inspect(BG)).tasks;
 	assert.deepEqual(
@@ -295,3 +408,37 @@ test("T-helper-plugin-off: a helper left running, then the plugin removed: the d
 	);
 	assert.ok((await childTaskStates(two.t.agent.harness)).every((state) => ["aborted", "completed"].includes(state)));
 });
+
+for (const outcome of ["error", "interrupted"] as const) {
+	test(`T-helper-report-${outcome}: an unsuccessful helper wakes the parent with a status`, async () => {
+		const faux = newFaux();
+		const release = gate();
+		faux.setResponses(
+			many(
+				router({
+					seen: [],
+					parent: delegate("fail or stop"),
+					child: async (context, options, state, model) => {
+						const cancelled = await Promise.race([release.promise, untilAborted(context, options, state, model)]);
+						return cancelled ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "synthetic error" });
+					},
+				}),
+			),
+		);
+		const { t, port } = await setup(faux);
+		cleanups.push(() => t.close());
+		await t.agent.channel.handleUpdate(textUpdate(CHAT, 1, "go"));
+		const ack = await waitFor(() => port.textsIn(CHAT).find((text) => text.startsWith("Parent got")));
+		const id = ack.match(/Helper (h\d+) started/)?.[1];
+		assert.ok(id);
+		if (outcome === "interrupted") {
+			const harness = t.agent.harness;
+			const helper = (await harness.inspect(BG)).tasks.find(({ record }) => `h${record.id}` === id);
+			assert.ok(helper);
+			await harness.abortTask(helper.record.id, BG);
+		} else release.open();
+		await waitFor(() =>
+			port.textsIn(CHAT).some((text) => text.startsWith(`Parent received: [helper ${id} ${outcome}]`)),
+		);
+	});
+}

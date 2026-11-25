@@ -90,8 +90,9 @@ away.
 
 ## Helpers: `helpers`
 
-Gives the agent a `helper` tool: it hands a self-contained task to a helper agent and gets the helper's final answer
-back as the tool result. A helper has the same tools as the main agent (bash, files, `telegram_send_file`, search,
+The `helper` tool starts a self-contained task in the background and returns its ID immediately. Each outcome wakes
+the calling conversation with a new input, such as `[helper h42 done] <answer>`. Failures use `error` and cancellations
+use `interrupted`. A helper has the same tools as the main agent (bash, files, `telegram_send_file`, search,
 MCP, reminders), except `helper` itself, so helpers cannot start helpers. A helper does not see the chat: the task
 text is all it knows. Several helper calls in one answer run at the same time.
 
@@ -102,7 +103,7 @@ text is all it knows. Several helper calls in one answer run at the same time.
 | `PI_HELPERS_MAX` | 4 | helper calls running at once per chat; a call over the limit comes back to the model as an error asking it to wait for the running ones |
 
 - A bad `PI_HELPER_MODEL` or `PI_HELPER_THINKING` is reported as a plugin problem; helpers then use the main model.
-- `/stop` and the stop button of a draft stop the helpers together with the answer.
+- Helpers keep working after `/stop` or a draft stop button ends the current turn.
 - After a restart a running helper goes on in the same helper conversation, and its task is not sent to it again.
   The limit is counted in memory per running service.
 - Helper spend is in the "All chats" line of `/status`, not in "This chat".
@@ -200,8 +201,8 @@ dependencies.
   service still starts. The log has `plugin_problem` with the reason, each allowed user gets one short chat line after
   start, and `/status` lists it under problems.
 - If you remove a plugin, or it breaks, while one of its tool calls is unfinished, the model gets that call back as an
-  error ("was interrupted") after the restart and the answer continues. A running helper stops with it. Startup is
-  never blocked by it.
+  error ("was interrupted") after the restart and the answer continues. A background helper whose plugin was disabled
+  reports an interruption to the calling conversation. Startup is never blocked by unfinished plugin work.
 
 ---
 

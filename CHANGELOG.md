@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `helper` starts a background job and returns its ID. Each result, error or interruption arrives as a new input in the calling chat. `/stop` and the draft stop button end only the active turn.
+
 ## 0.1.10 (2026-11-03)
 
 - Messages received while busy steer the current run at its next boundary, including tool rounds.

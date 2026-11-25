@@ -2,25 +2,55 @@ import type { Context } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	type AgentChange,
-	AssistantEntry,
 	type ConversationId,
 	configure,
+	defineDoc,
 	defineExtension,
 	defineTool,
 	type Extension,
+	type TaskId,
 	type ToolExecutionApi,
+	type Tx,
 } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 import { resolveModel } from "../agent/models.ts";
 import { loadProvider } from "../agent/providers.ts";
 import { ChatInfo } from "../channel/docs.ts";
 import { THINKING_LEVELS } from "../config/schema.ts";
-import { finalReplyText } from "../delivery/final-text.ts";
+import { HELPER_TASK, type HelperTask } from "./helper-task.ts";
 import type { PluginContext } from "./load.ts";
 
 export const DEFAULT_HELPERS_MAX = 4;
 type Ctx = Pick<PluginContext, "env" | "models" | "problem">;
 type Settings = { readonly max: number; readonly change: AgentChange };
+type Launch = { id: TaskId; child: ConversationId };
+
+const HelperLaunch = defineDoc<{ launch?: Launch }>({
+	kind: "tg.helper-launch",
+	version: 1,
+	checkpointWhen: () => false,
+	scope: "task",
+	initial: () => ({}),
+});
+
+const HelperSlots = defineDoc<{ ids: TaskId[] }>({
+	kind: "tg.helper-slots",
+	version: 1,
+	checkpointWhen: () => false,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ ids: [] }),
+});
+
+async function activeHelpers(tx: Tx, ids: readonly TaskId[]): Promise<TaskId[]> {
+	const active: TaskId[] = [];
+	for (const id of ids) {
+		const record = await tx.task(id);
+		if (record !== undefined && record.state.status !== "terminal") active.push(id);
+	}
+	return active;
+}
 
 function parseMax(ctx: Ctx): number {
 	const raw = ctx.env.PI_HELPERS_MAX?.trim();
@@ -69,47 +99,54 @@ async function modelChange(ctx: Ctx, thinking: ModelThinkingLevel | undefined): 
 	}
 }
 
-/**
- * The child conversation is owned by this tool call's task: found again after a restart through the ownership index,
- * aborted with the call, and given the same chat so its tools reach the user. Without `self` it cannot start helpers.
- */
-async function runHelper(task: string, api: ToolExecutionApi, context: Context, self: Extension, settings: Settings) {
-	const child = await api.commit(async (tx) => {
-		const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
-		if (existing !== undefined) return existing.id;
-		const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
+/** Persist the launch receipt with the job so replay of the tool cannot start a second helper. */
+async function startHelper(task: string, api: ToolExecutionApi, context: Context, self: Extension, settings: Settings) {
+	const result = await api.commit(async (tx) => {
+		const receipt = await tx.doc(HelperLaunch, api.taskId);
+		if (receipt.launch !== undefined) return { launch: { ...receipt.launch } };
+		const legacy = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
+		if (legacy !== undefined) return { legacy: legacy.id };
+
+		const slots = await tx.doc(HelperSlots, api.conversationId);
+		const active = await activeHelpers(tx, slots.ids);
+		if (active.length >= settings.max)
+			throw new Error(`${active.length} helpers are already running; wait for their answers, then call helper again.`);
+
+		const id = await tx.createTask(
+			api.registry.task(HELPER_TASK) as unknown as HelperTask,
+			{ task },
+			{
+				ownership: { kind: "conversation" },
+				background: true,
+			},
+		);
+		const created = await tx.createConversation({ ownership: { kind: "task", taskId: id } });
 		await configure(tx, created.id, { ...settings.change, extensions: { remove: [self] } });
 		(await tx.doc(ChatInfo, created.id)).chatId = (await tx.doc(ChatInfo, api.conversationId)).chatId;
-		return created.id;
+		slots.ids = [...active, id];
+		const launch = { id, child: created.id };
+		receipt.launch = launch;
+		return { launch };
 	}, context);
-	await api.details({ conversationId: child }, context);
-	const handle = await api.conversation(child, context);
-	if (handle === undefined) throw new Error("the helper's conversation is missing");
-	const request = { type: "input", content: task, requestId: `helper:${api.taskId}` } as const;
-	const settled = await (await handle.submit(request, context)).wait(context);
-	if (settled.status !== "done" || settled.type !== "input")
-		throw new Error(`the helper gave no answer (${settled.status === "unanswered" ? settled.reason : settled.type})`);
-	const answer = settled.answer;
-	const entry = await api.commit((tx) => tx.entry(AssistantEntry, answer), context);
-	const text = finalReplyText(entry?.model?.[0]) ?? "(the helper answered with no text)";
+	if (result.legacy !== undefined) {
+		await (await api.conversation(result.legacy, context))?.abort(context);
+		throw new Error("A helper from before the upgrade was interrupted. Check its work before retrying.");
+	}
+	const { id, child } = result.launch;
+	const text = `Helper h${id} started in the background. Its report will arrive as a separate message.`;
 	return { output: [{ type: "text" as const, text }], details: { conversationId: child } };
 }
 
 export function createHelpersExtension(settings: Settings): Extension {
-	const running = new Map<ConversationId, number>();
-	const release = (id: ConversationId) => {
-		const left = (running.get(id) ?? 1) - 1;
-		if (left > 0) running.set(id, left);
-		else running.delete(id);
-	};
 	const extension: Extension = defineExtension({
 		name: "helpers",
 		tools: [
 			defineTool({
 				name: "helper",
 				description:
-					"Give a self-contained task to a helper agent with the same tools and get its final answer. The helper does " +
-					"not see this chat: put everything it needs into task. Several helper calls in one turn run in parallel, " +
+					"Start a helper with the same tools in the background and return its id immediately. Its report arrives " +
+					"as a new message, [helper <id> done|error|interrupted]. Continue your turn after starting it. The helper " +
+					"cannot see this chat: put everything it needs into task. Several helper calls in one turn run in parallel, " +
 					`at most ${settings.max} at a time.`,
 				parameters: obj(
 					{
@@ -118,17 +155,7 @@ export function createHelpersExtension(settings: Settings): Extension {
 					{ open: true },
 				),
 				replay: "safe",
-				execute: async ({ task }, api, context) => {
-					const count = running.get(api.conversationId) ?? 0;
-					if (count >= settings.max)
-						throw new Error(`${count} helpers are already running; wait for their answers, then call helper again.`);
-					running.set(api.conversationId, count + 1);
-					try {
-						return await runHelper(task, api, context, extension, settings);
-					} finally {
-						release(api.conversationId);
-					}
-				},
+				execute: ({ task }, api, context) => startHelper(task, api, context, extension, settings),
 			}),
 		],
 	});

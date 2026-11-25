@@ -107,7 +107,7 @@ the same package and stay off until you switch them on with one line in the sett
 | Web search | looks things up on the internet with your Tavily, Exa, Brave or Parallel key | available |
 | MCP | connects MCP servers: calendars, databases, your own tools | available |
 | Skills | a folder of instructions it reads when a task needs them | available |
-| Helpers | splits a big job between helper agents, on a cheaper model if you like | available |
+| Helpers | splits a job between background agents and gets their reports as new messages | available |
 | Tasks and reminders | does something later on its own and writes to you first | available |
 
 How to switch each one on and how to write your own: [docs/plugins.md](docs/plugins.md).

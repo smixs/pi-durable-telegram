@@ -18,3 +18,15 @@ Code correspondence: `test/integration/delivery.test.ts` exercises steering duri
 delay calculation; `test/integration/auth-retry.test.ts` checks real generation checkpoints and budgets across
 SQLite reopens, successful rotation and stopping a sleeping retry. `test/example/install.test.ts` packs and installs
 the package in a clean npm project, checks all four fixes, idempotence and rejection of an unexpected upstream file.
+
+## Background helpers
+
+`BackgroundHelpers.tla` models two launches, independent completion, parent stop and replay after restart. A parent
+can finish with helpers still working. Stopping that parent preserves the helpers. A launch receipt prevents a
+duplicate start. Each terminal outcome commits with one report admission.
+
+Run `tlc -workers 1 -config docs/formal/BackgroundHelpers.cfg docs/formal/BackgroundHelpers.tla`. With each of `wait`,
+`cascade`, `duplicate` and `lost-report` in place of `none`, TLC should report an invariant violation.
+`test/integration/helpers.test.ts` checks the launch and wake path against SQLite and exercises stop, restart, abort and
+provider failure using a fake model and Telegram port. The model treats the database commits as atomic and abstracts
+the transport from input admission to answer delivery.
